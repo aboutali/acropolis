@@ -1,14 +1,15 @@
 // Erechtheion: complex split-level temple with east/north/south/west porches and olive tree
 window.buildErechtheion = function (THREE, mats, H) {
   var group = new THREE.Group();
-  group.position.set(-42, 0, -34);
+  // y = 1.0 lifts the two base steps above the plateau
+  group.position.set(-42, 1.0, -34);
 
   // Base: stepped base for the main structure
   var base = H.makeSteppedBase(22.8, 11.6, 2, 0.5);
   group.add(base);
 
   // Main block: cella with entablature and gable roof
-  var cella = H.makeCella(22.8, 11.6, 6.6, {doorWidth: 3, doorSide: '+x'});
+  var cella = H.makeCella(19.0, 10.0, 6.6, {doorWidth: 3, doorSide: '+x', thickness: 0.8});
   group.add(cella);
 
   var entablatureMain = H.makeEntablature(22.8, 11.6, 1.6, {triglyphs: false});
@@ -20,16 +21,16 @@ window.buildErechtheion = function (THREE, mats, H) {
   roofMain.position.y = 8.2;
   group.add(roofMain);
 
-  // East porch: 6 Ionic columns at x = 12.9, z evenly spaced from -5.2 to 5.2
+  // East porch: 6 Ionic columns at x = 11.0, z evenly spaced from -5.2 to 5.2
   var eastPositions = [
-    [12.9, -5.2],
-    [12.9, -3.12],
-    [12.9, -1.04],
-    [12.9, 1.04],
-    [12.9, 3.12],
-    [12.9, 5.2]
+    [11.0, -5.2],
+    [11.0, -3.12],
+    [11.0, -1.04],
+    [11.0, 1.04],
+    [11.0, 3.12],
+    [11.0, 5.2]
   ];
-  var eastColumns = H.makeIonicColumns(eastPositions, {height: 6.6, baseD: 0.85});
+  var eastColumns = H.makeIonicColumns(eastPositions, {height: 6.6, baseD: 0.85, rotY: Math.PI / 2});
   group.add(eastColumns);
 
   // North porch: split-level (3.2m below main floor)
@@ -79,31 +80,31 @@ window.buildErechtheion = function (THREE, mats, H) {
   northRoof.receiveShadow = true;
   group.add(northRoof);
 
-  // South porch: caryatid porch centred at (+6, 0, +5.8)
+  // South porch: caryatid porch centred at (+6, 0, +7.35), in front of the south wall
   // Podium
   var caryatidPodium = new THREE.Mesh(
     new THREE.BoxGeometry(5.0, 1.8, 3.1),
     mats.marbleWorn
   );
-  caryatidPodium.position.set(6, 0.9, 5.8);
+  caryatidPodium.position.set(6, 0.9, 7.35);
   caryatidPodium.castShadow = true;
   caryatidPodium.receiveShadow = true;
   group.add(caryatidPodium);
 
   // 6 caryatids at y = 1.8
-  // Front row: 4 caryatids at z = 5.8 + 1.2 = 6.8, x = 6 + (-1.9, -0.63, 0.63, 1.9)
+  // Front row: 4 caryatids at z = 8.3, x = 6 + (-1.9, -0.63, 0.63, 1.9)
   var frontXPositions = [-1.9, -0.63, 0.63, 1.9];
   for (var i = 0; i < frontXPositions.length; i++) {
     var caryatid = H.makeCaryatid(2.3);
-    caryatid.position.set(6 + frontXPositions[i], 1.8, 6.8);
+    caryatid.position.set(6 + frontXPositions[i], 1.8, 8.3);
     group.add(caryatid);
   }
 
-  // Rear row: 2 caryatids at z = 5.8 - 0.1 = 5.7, x = 6 ± 1.9
+  // Rear row: 2 caryatids at z = 6.6, x = 6 ± 1.9
   for (var j = 0; j < 2; j++) {
     var caryatidRear = H.makeCaryatid(2.3);
     var xPos = j === 0 ? 6 - 1.9 : 6 + 1.9;
-    caryatidRear.position.set(xPos, 1.8, 5.7);
+    caryatidRear.position.set(xPos, 1.8, 6.6);
     group.add(caryatidRear);
   }
 
@@ -112,21 +113,22 @@ window.buildErechtheion = function (THREE, mats, H) {
     new THREE.BoxGeometry(5.4, 0.9, 3.5),
     mats.marble
   );
-  caryatidEntabSlab.position.set(6, 1.8 + 2.3 + 0.45, 5.8);
+  caryatidEntabSlab.position.set(6, 1.8 + 2.3 + 0.45, 7.35);
   caryatidEntabSlab.castShadow = true;
   caryatidEntabSlab.receiveShadow = true;
   group.add(caryatidEntabSlab);
 
-  // West wall: 4 engaged half-columns at x = -11.6, z evenly spaced from -4 to 4
+  // West wall: 4 engaged half-columns at x = -10.6, z evenly spaced from -4 to 4
   var westPositions = [
-    [-11.6, -4],
-    [-11.6, -1.33333],
-    [-11.6, 1.33333],
-    [-11.6, 4]
+    [-10.6, -4],
+    [-10.6, -1.33333],
+    [-10.6, 1.33333],
+    [-10.6, 4]
   ];
   var westColumns = H.makeIonicColumns(westPositions, {
     height: 5.8,
-    baseD: 0.7
+    baseD: 0.7,
+    rotY: Math.PI / 2
   });
   group.add(westColumns);
 

@@ -7,4 +7,4 @@ A single self-contained `index.html` that renders the Acropolis (Parthenon, Erec
 - `docs/PLAN.md`, `docs/specs/` — the design and the per-module specs the build agents follow.
 - `docs/PROGRESS.md` — build status.
 
-Build: `node tools/check.mjs && node tools/assemble.mjs`, then open `index.html`. Add `?debug` to the URL for a triangle/FPS readout.
+Build: `node tools/check.mjs && node tools/assemble.mjs`, then open `index.html`. Add `?debug` to the URL for a triangle/FPS readout, `?view=parthenon` (or erechtheion, propylaea, promachos, southslope, overview) for a preset camera. `node tools/shoot.mjs` writes preset screenshots to `tools/shots/`.

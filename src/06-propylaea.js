@@ -36,7 +36,7 @@ window.buildPropylaea = function (THREE, mats, H) {
       ionicPos.push([x, z]);
     }
   }
-  var ionicCols = H.makeIonicColumns(ionicPos, {height: 10.25, baseD: 1.0});
+  var ionicCols = H.makeIonicColumns(ionicPos, {height: 10.25, baseD: 1.0, rotY: Math.PI / 2});
   group.add(ionicCols);
 
   // Cross-wall at x = +3: 6 pillars and lintel
@@ -177,11 +177,11 @@ window.buildPropylaea = function (THREE, mats, H) {
       templeColPos.push([x, z]);
     }
   }
-  var templeCols = H.makeIonicColumns(templeColPos, {height: 4.0, baseD: 0.56, y: 3.9});
+  var templeCols = H.makeIonicColumns(templeColPos, {height: 4.0, baseD: 0.52, y: 3.9});
   group.add(templeCols);
 
   // Cella
-  var templeCella = H.makeCella(3.7, 5.0, 4.0, {doorWidth: 1.4, doorSide: '+z'});
+  var templeCella = H.makeCella(3.7, 4.4, 4.0, {doorWidth: 1.4, doorSide: '+z', thickness: 0.4});
   templeCella.position.set(-15, 3.9, 26);
   group.add(templeCella);
 

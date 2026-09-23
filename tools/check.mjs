@@ -78,7 +78,7 @@ function checkFile(file) {
     const nanLog = [];
     const THREE = makeStubTHREE(nanLog);
     const win = { CFG: { PLATEAU_H: 80, PLATEAU_X: 300, PLATEAU_Z: 150, PLATEAU_CX: -45, PLATEAU_CZ: 0, MOBILE: false, SEG: { colRadial: 40, colHeight: 4, capital: 24 } } };
-    const doc = { createElement: () => stubObj(nanLog), getElementById: () => stubObj(nanLog), addEventListener() {} };
+    const doc = { createElement: () => stubObj(nanLog), getElementById: () => stubObj(nanLog), querySelectorAll: () => [], addEventListener() {} };
     const fn = new Function('window', 'THREE', 'document', 'innerWidth', 'innerHeight', 'performance', 'requestAnimationFrame', 'location', 'setTimeout', 'setInterval', code + `\n;return window.${exp};`);
     const perf = { now: () => 1000 };
     const result = fn(win, THREE, n === 1 || n === 12 ? doc : undefined, 1440, 900, perf, () => 0, { search: '' }, () => 0, () => 0);

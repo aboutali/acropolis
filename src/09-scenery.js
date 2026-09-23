@@ -146,44 +146,7 @@ window.buildScenery = function (THREE, mats, H) {
   );
   group.add(oliveCanopy);
 
-  // Cypresses - 12 on south slope
-  var cypresses = [];
-  for (var i = 0; i < 12; i++) {
-    var cx = -150 + rnd() * (40 - (-150));
-    var cz = 80 + rnd() * (110 - 80);
-    var cy = -8 - (cz - 80) * 0.7;
-    cypresses.push({x: cx, z: cz, y: cy});
-  }
-
-  // Cypress canopies
-  var cypressCanopyTransforms = [];
-  for (var i = 0; i < cypresses.length; i++) {
-    cypressCanopyTransforms.push({
-      p: [cypresses[i].x, cypresses[i].y + 5.2, cypresses[i].z]
-    });
-  }
-
-  var cypressCanopy = H.instance(
-    new THREE.ConeGeometry(1.3, 9, 8),
-    mats.foliageCypress,
-    cypressCanopyTransforms
-  );
-  group.add(cypressCanopy);
-
-  // Cypress trunks
-  var cypressTrunkTransforms = [];
-  for (var i = 0; i < cypresses.length; i++) {
-    cypressTrunkTransforms.push({
-      p: [cypresses[i].x, cypresses[i].y + 0.75, cypresses[i].z]
-    });
-  }
-
-  var cypressTrunk = H.instance(
-    new THREE.CylinderGeometry(0.2, 0.25, 1.5, 6),
-    mats.trunk,
-    cypressTrunkTransforms
-  );
-  group.add(cypressTrunk);
+  // Cypresses live in 08-southslope, which drops them onto the carved rock apron
 
   // Rubble blocks - 60 blocks on ellipse at radius factor [0.85, 0.93]
   var rubbleTransforms = [];

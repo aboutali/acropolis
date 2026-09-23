@@ -33,20 +33,27 @@ const html = `<title>Acropolis of Athens</title>
     color: var(--ink); font-size: 20px; cursor: pointer; backdrop-filter: blur(6px); }
   #autorot.off { opacity: .5; }
   #debug { position: fixed; top: 12px; right: 12px; padding: 4px 8px; border-radius: 6px; background: var(--panel); font: 12px ui-monospace, Menlo, Consolas, monospace; }
+  #legend li { display: flex; align-items: baseline; }
+  #legend li::before { flex: none; }
+  #legend button { all: unset; cursor: pointer; border-radius: 4px; }
+  #legend button:hover { color: var(--accent); }
+  #legend button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   @media (max-width: 640px) { #legend { font-size: 11px; padding: 8px 10px; } #legend h1 { font-size: 13px; } }
 </style>
 <div id="app"></div>
 <div id="legend">
   <h1>Acropolis of Athens</h1>
   <ul>
-    <li style="--dot:#e8e0cf">Parthenon, 447–432 BC</li>
-    <li style="--dot:#d8cdb6">Erechtheion &amp; Caryatids</li>
-    <li style="--dot:#cfc4ad">Propylaea &amp; Temple of Athena Nike</li>
-    <li style="--dot:#6f5b3e">Athena Promachos</li>
-    <li style="--dot:#9a8f7a">Theatre of Dionysus &amp; Odeon</li>
+    <li style="--dot:#e8e0cf"><button data-view="parthenon">Parthenon, 447–432 BC</button></li>
+    <li style="--dot:#d8cdb6"><button data-view="erechtheion">Erechtheion &amp; Caryatids</button></li>
+    <li style="--dot:#cfc4ad"><button data-view="propylaea">Propylaea &amp; Temple of Athena Nike</button></li>
+    <li style="--dot:#6f5b3e"><button data-view="promachos">Athena Promachos</button></li>
+    <li style="--dot:#9a8f7a"><button data-view="southslope">Theatre of Dionysus &amp; Odeon</button></li>
+    <li style="--dot:transparent"><button data-view="overview">Whole hill</button></li>
+  </ul>
   </ul>
 </div>
-<div id="hint">drag to orbit · pinch or scroll to zoom</div>
+<div id="hint">drag to orbit · pinch to zoom · tap a name to fly</div>
 <button id="autorot" aria-pressed="true" title="Toggle auto-rotate">⟳</button>
 <div id="debug" hidden></div>
 <script src="${THREE_URL}"></script>
