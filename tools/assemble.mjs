@@ -14,8 +14,10 @@ const scripts = files.map(f => {
 
 const html = `<title>Acropolis of Athens</title>
 <meta name="description" content="Interactive 3D reconstruction of the Acropolis of Athens, rendered procedurally with three.js.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&display=swap">
 <style>
   :root { --ink: #f2ece0; --panel: rgba(20, 24, 30, .62); --accent: #e3c78a; }
+  #legend h1 { font-family: Cinzel, "Trajan Pro", Georgia, serif; letter-spacing: .08em; text-transform: uppercase; }
   html, body { height: 100%; }
   body { margin: 0; overflow: hidden; background: #87b6de; color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   #app { position: fixed; inset: 0; }
