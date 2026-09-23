@@ -333,7 +333,9 @@ window.buildSouthSlope = function (THREE, mats, H) {
   var ray = new THREE.Raycaster();
   var down = new THREE.Vector3(0, -1, 0);
   var canopyT = [], trunkT = [];
-  for (var tries = 0; tries < 200 && canopyT.length < 16; tries++) {
+  // Denser cypress cover on the hillside apron between the two theatres (was a sparse 16) --
+  // matches the wider hillside-vegetation density pass in 03-terrain.js.
+  for (var tries = 0; tries < 700 && canopyT.length < 46; tries++) {
     var cx3 = -175 + rnd() * 215, cz3 = 70 + rnd() * 70;
     if (floorAt(cx3, cz3) < Infinity) continue;
     ray.set(new THREE.Vector3(cx3, 50, cz3), down);

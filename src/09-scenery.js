@@ -117,7 +117,9 @@ window.buildScenery = function (THREE, mats, H) {
     var lobes = 6 + (i % 2);
     for (var j = 0; j < lobes; j++) {
       var offsetAngle = (j / lobes) * Math.PI * 2 + rnd() * 0.6;
-      var offsetDist = 1.5 + rnd() * 1.3;
+      // Lobe separation widened ~20% so the gaps between clumps stay legible at medium distance
+      // (>200m) instead of the crown reading as one fused blob.
+      var offsetDist = 1.8 + rnd() * 1.56;
       var offsetX = tree.x + Math.cos(offsetAngle) * offsetDist;
       var offsetZ = tree.z + Math.sin(offsetAngle) * offsetDist;
       var offsetY = 3.0 + (rnd() - 0.5) * 2 * 1.0;

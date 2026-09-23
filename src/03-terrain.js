@@ -59,7 +59,7 @@ window.buildTerrain = function (THREE, mats, H) {
   // ---------------- 1. Plateau top: flat worn limestone platform ----------------
   // Undulation is kept under ~0.3m everywhere (fine mottling + a few raised bedrock slabs);
   // only right at the rim does the surface fold down to meet the cliff mesh below.
-  var PW = 300, PD = 150, segX = MOBILE ? 56 : 96, segZ = MOBILE ? 28 : 48;
+  var PW = 300, PD = 150, segX = MOBILE ? 48 : 80, segZ = MOBILE ? 24 : 40;
   function fineWeather(x, z) {
     return 0.6 * H.noise2(x * 0.045, z * 0.05, 511) + 0.4 * H.noise2(x * 0.085, z * 0.09, 517);
   }
@@ -82,7 +82,11 @@ window.buildTerrain = function (THREE, mats, H) {
     var e = sqrt((x / 150) * (x / 150) + (z / 75) * (z / 75));
     var bedrock = H.noise2(x * 0.04, z * 0.055, 23); // -1..1
     var slab = clamp01((bedrock - 0.32) / 0.2); // a handful of raised bedrock slabs, smooth-edged
-    var y = 0.06 * fineWeather(x, z) + 0.22 * slab; // <= ~0.28m of texture + step, everywhere
+    // Fine ripple halved again and gated off within ~50m of the rim fold (e > ~0.68..0.86), so
+    // the worn-rock esplanade reads dead flat right where it meets the cliff, with any residual
+    // texture confined to the interior of the platform.
+    var rippleGate = 1 - smooth((e - 0.68) / 0.18 < 0 ? 0 : (e - 0.68) / 0.18 > 1 ? 1 : (e - 0.68) / 0.18);
+    var y = 0.03 * fineWeather(x, z) * rippleGate + 0.22 * slab; // <= ~0.25m of texture + step, everywhere
     if (e > 0.86) y -= (e - 0.86) * 34; // rim fold: blends into the cliff mesh, not "undulation"
     return y - cutAt(x, z);
   }
@@ -198,7 +202,7 @@ window.buildTerrain = function (THREE, mats, H) {
     var bands = 6;
     var bt = t * bands + phase;
     var bandFrac = bt - floor(bt);
-    var ledgeDepthM = 0.55 + 0.35 * H.noise2(cos(a) * 6.3, sin(a) * 6.3, seed + 41); // metres
+    var ledgeDepthM = 1.025 + 0.275 * H.noise2(cos(a) * 6.3, sin(a) * 6.3, seed + 41); // metres (0.75-1.3m: stronger shadow lines)
     var ledgeT = bandFrac < 0.24 ? smooth((0.24 - bandFrac) / 0.24) : 0;
     var ledge = (t < CLIFF_T ? ledgeT * ledgeDepthM : 0) / RX;
     // Narrow fissures: gated by a coarse mask so only a handful appear, not a continuous ripple.
@@ -218,7 +222,17 @@ window.buildTerrain = function (THREE, mats, H) {
     var micro = microM / RX;
     // Talus fan: the slope widens gently as it flares out to meet the plain.
     var scree = t > CLIFF_T ? pow((t - CLIFF_T) / (1 - CLIFF_T), 1.3) * 0.85 : 0;
-    return 1 + ledge + fissure + overhang + scree + micro;
+    // Broken-rock rubble bump-field right at the cliff foot: small irregular metre-scale bumps
+    // (not a smooth flare) fading in just past the cliff base and fading back out over the talus.
+    var taluBumpM = 0;
+    if (t > CLIFF_T) {
+      var bn = H.noise2(cos(a) * 15 + t * 40, sin(a) * 15, seed + 47);
+      var fadeIn = smooth(clamp01((t - CLIFF_T) / 0.05));
+      var fadeOut = 1 - smooth(clamp01((t - (CLIFF_T + 0.22)) / 0.2));
+      taluBumpM = (0.1 + 0.3 * (0.5 + 0.5 * bn)) * fadeIn * Math.max(0, fadeOut);
+    }
+    var taluBump = taluBumpM / RX;
+    return 1 + ledge + fissure + overhang + scree + micro + taluBump;
   }
   function cliffY(t) {
     if (t < CLIFF_T) return -t / CLIFF_T * 50;
@@ -254,7 +268,7 @@ window.buildTerrain = function (THREE, mats, H) {
     geo.computeVertexNormals();
     return geo;
   }
-  var radialSeg = MOBILE ? 70 : 128, ringSeg = MOBILE ? 16 : 28;
+  var radialSeg = MOBILE ? 70 : 128, ringSeg = MOBILE ? 14 : 24;
   var cliffGeo = ringGeometry(ringSeg, radialSeg, 0);
   paintVertexColors(cliffGeo, 900, true);
   var cliffMesh = new THREE.Mesh(cliffGeo, weatheredMat(mats.rockDark, 900));
@@ -271,30 +285,38 @@ window.buildTerrain = function (THREE, mats, H) {
   group.add(groundMesh);
 
   // ---------------- 3. Hillside vegetation: Aleppo pines, dense scrub clumps, talus debris ----------------
+  // Dense hillside cover between the cliff foot and the plain: pines and scrub clumps at ~4x the
+  // previous instance counts. Both use cheap low-poly primitives (octahedron canopies/blobs
+  // instead of icosahedra) so the coverage increase stays affordable -- at hillside viewing
+  // distance the textured material reads the shape, not the facet count.
   var hillR = lcg(140);
-  var trunkGeo = new THREE.CylinderGeometry(0.14, 0.22, 2.6, 6);
-  var pineGeo = new THREE.IcosahedronGeometry(1.6, 0);
-  var scrubGeo = new THREE.IcosahedronGeometry(0.55, 0);
+  var trunkGeo = new THREE.CylinderGeometry(0.14, 0.22, 2.6, 5);
+  var pineGeo = new THREE.OctahedronGeometry(1.7, 0);
+  var scrubGeo = new THREE.OctahedronGeometry(0.6, 0);
   var pineTrunkT = [], pineCanopyT = [], scrubT = [];
-  var pineCount = MOBILE ? 22 : 50;
+  // t is capped well short of 1 (unlike the boulder/rubble talus spray below, which fades out
+  // anyway): at the higher counts here, even the previous build's occasional stragglers that
+  // rode the talus's own noisy outer flare out toward the plain became numerous enough to read
+  // as scrub scattered into the city plaza, so pines/scrub are kept to the upper cliff+talus face.
+  var pineCount = MOBILE ? 55 : 195;
   for (var p = 0; p < pineCount; p++) {
-    var pa = hillR() * PI * 2, pt = 0.35 + hillR() * 0.55;
+    var pa = hillR() * PI * 2, pt = 0.32 + hillR() * 0.36;
     var m = cliffRadiusMul(pt, pa, 5);
     var px = CX + cos(pa) * RX * m, pz = CZ + sin(pa) * RZ * m, py = cliffY(pt);
-    var psc = 0.7 + hillR() * 0.6;
+    var psc = 0.55 + hillR() * 1.05; // wider height range -> more silhouette variation
     pineTrunkT.push({ p: [px, py + 1.3 * psc, pz], s: [psc, psc, psc] });
-    pineCanopyT.push({ p: [px, py + 2.9 * psc, pz], s: [psc * 1.1, psc * 0.55, psc * 1.1] });
+    pineCanopyT.push({ p: [px, py + 2.9 * psc, pz], r: [0, hillR() * PI * 2, 0], s: [psc * 1.1, psc * (0.5 + hillR() * 0.25), psc * 1.1] });
   }
-  var clusterCount = MOBILE ? 30 : 72;
+  var clusterCount = MOBILE ? 90 : 290;
   for (var sc = 0; sc < clusterCount; sc++) {
-    var sa = hillR() * PI * 2, st = 0.4 + hillR() * 0.58;
+    var sa = hillR() * PI * 2, st = 0.38 + hillR() * 0.34;
     var sm = cliffRadiusMul(st, sa, 5);
     var sx = CX + cos(sa) * RX * sm, sz = CZ + sin(sa) * RZ * sm, sy = cliffY(st);
-    var clumpN = 3 + ((hillR() * 3) | 0);
+    var clumpN = 3 + ((hillR() * 4) | 0);
     for (var ci = 0; ci < clumpN; ci++) {
-      var jang = hillR() * PI * 2, jr = hillR() * 2.0;
+      var jang = hillR() * PI * 2, jr = hillR() * 2.3;
       var jx = sx + cos(jang) * jr, jz = sz + sin(jang) * jr;
-      var ssc = 0.5 + hillR() * 0.75;
+      var ssc = 0.45 + hillR() * 0.85;
       scrubT.push({ p: [jx, sy + 0.32 * ssc, jz], r: [0, hillR() * PI * 2, 0], s: [ssc * (0.8 + hillR() * 0.4), ssc * 0.7, ssc * (0.8 + hillR() * 0.4)] });
     }
   }
@@ -310,22 +332,26 @@ window.buildTerrain = function (THREE, mats, H) {
   }
   var taluBoulderMat = warmBrighten(mats.rockDark, 0.18, 0.14, 0.06);
   var taluRubbleMat = warmBrighten(mats.rock, 0.16, 0.13, 0.07);
-  var boulderGeo = new THREE.IcosahedronGeometry(1, 1);
+  // Detail-0 icosahedron (20 tris, half the cost of the previous detail-1 boulders) buys room for
+  // more boulders -- a broken-rock field reads through sheer count more than per-rock smoothness.
+  var boulderGeo = new THREE.IcosahedronGeometry(1, 0);
   var boulderT = [];
-  var boulderCount = MOBILE ? 8 : 14;
+  var boulderCount = MOBILE ? 12 : 22;
   for (var bo = 0; bo < boulderCount; bo++) {
-    var ba = taluR() * PI * 2, btq = CLIFF_T + 0.06 + taluR() * 0.5;
+    var ba = taluR() * PI * 2, btq = CLIFF_T + 0.03 + pow(taluR(), 1.5) * 0.24; // biased toward the cliff foot, kept off the city plaza
     var bm = cliffRadiusMul(btq, ba, 5);
     var bx = CX + cos(ba) * RX * bm, bz = CZ + sin(ba) * RZ * bm, by = cliffY(btq);
     var bsc = 2.0 + taluR() * 3.5;
     boulderT.push({ p: [bx, by + bsc * 0.35, bz], r: [taluR() * PI, taluR() * PI, taluR() * PI], s: [bsc, bsc * (0.7 + taluR() * 0.4), bsc * (0.85 + taluR() * 0.3)] });
   }
   group.add(H.instance(boulderGeo, taluBoulderMat, boulderT));
-  var rubbleGeo = new THREE.IcosahedronGeometry(0.32, 0);
+  // Octahedron (8 tris, well under half the previous icosahedron's cost) lets the rubble spray
+  // grow denser at the cliff base -- a real scree field is mostly count, not per-chip roundness.
+  var rubbleGeo = new THREE.OctahedronGeometry(0.34, 0);
   var rubbleT = [];
-  var rubbleCount = MOBILE ? 90 : 190;
+  var rubbleCount = MOBILE ? 160 : 340;
   for (var ru = 0; ru < rubbleCount; ru++) {
-    var ra = taluR() * PI * 2, rtq = CLIFF_T + 0.02 + taluR() * 0.68;
+    var ra = taluR() * PI * 2, rtq = CLIFF_T + 0.01 + pow(taluR(), 1.7) * 0.3; // sparse spray, densest right at the base, kept off the city plaza
     var rm2 = cliffRadiusMul(rtq, ra, 5);
     var rx = CX + cos(ra) * RX * rm2, rz = CZ + sin(ra) * RZ * rm2, ry = cliffY(rtq);
     var rsc = 0.5 + taluR() * 1.1;
@@ -342,8 +368,25 @@ window.buildTerrain = function (THREE, mats, H) {
   var rot0 = cos(CITY_ROT), rot1 = sin(CITY_ROT);
   function fromGrid(gx, gz) { return [gx * rot0 - gz * rot1, gx * rot1 + gz * rot0]; }
   var bodyGeo = new THREE.BoxGeometry(1, 1, 1);
-  var roofGeo = new THREE.ConeGeometry(0.82, 0.6, 4, 1);
-  roofGeo.rotateY(PI / 4);
+  // Hand-built hip-roof pyramid: 4 slanted side faces + a 2-tri base, 6 triangles total versus
+  // the 12 a 4-sided ConeGeometry costs in r128 (its degenerate apex ring still counts as full
+  // side triangles) -- same footprint/orientation (corners on the diagonals, so the slopes line
+  // up with the box body's own walls), half the cost, spent instead on far more houses.
+  function pyramidRoofGeo(radius, height) {
+    var a = radius * Math.SQRT1_2;
+    var C0 = [a, 0, a], C1 = [-a, 0, a], C2 = [-a, 0, -a], C3 = [a, 0, -a], apex = [0, height, 0];
+    var tris = [
+      apex, C1, C0, apex, C2, C1, apex, C3, C2, apex, C0, C3, // 4 sloped sides
+      C0, C1, C2, C0, C2, C3 // base cap (2 tris)
+    ];
+    var verts = new Float32Array(tris.length * 3);
+    for (var vi = 0; vi < tris.length; vi++) { verts[vi * 3] = tris[vi][0]; verts[vi * 3 + 1] = tris[vi][1]; verts[vi * 3 + 2] = tris[vi][2]; }
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+    geo.computeVertexNormals();
+    return geo;
+  }
+  var roofGeo = pyramidRoofGeo(0.82, 0.6);
   var houseT = [], farT = [], microT = [];
   var terracottaVariants = [
     [0.90, 0.42, 0.20], [0.80, 0.50, 0.20], [0.90, 0.70, 0.40], [0.62, 0.40, 0.27], [0.74, 0.56, 0.32]
@@ -364,8 +407,13 @@ window.buildTerrain = function (THREE, mats, H) {
   var parkGeo = new THREE.BoxGeometry(1, 1, 1);
   var cityTreeTrunkT = [], cityTreeCanopyT = [], parkT = [];
 
-  var cellNear = 20, cellMid = 34, cellFar = 62; // block cell size by ring (metres)
-  var maxR = 1150;
+  var cellNear = 20, cellMid = 34, cellFar = 62, cellTaper = cellFar * 1.2; // block cell size by ring (metres)
+  var maxR = 1350; // extended from 1100 so the far LOD tier tapers out instead of cutting off abruptly
+  var storyH = 2.9;
+  // Street-surface tiles: pale worn stone strips laid into the street lanes near+mid tier so the
+  // gaps between blocks read as walked/paved paths rather than plain bare sand.
+  var streetGeo = new THREE.BoxGeometry(1, 1, 1);
+  var streetT = [];
   function ellipseE(hx, hz) {
     var dx = hx + 45, dz = hz;
     return (dx / 160) * (dx / 160) + (dz / 85) * (dz / 85);
@@ -373,8 +421,8 @@ window.buildTerrain = function (THREE, mats, H) {
   // Walk rings of increasing radius; within each ring, walk around it at the ring's own angular
   // step (derived from its cell size) so density stays even instead of thinning like 1/r.
   for (var rr = 46; rr < maxR; ) {
-    var cell = rr < 260 ? cellNear : rr < 620 ? cellMid : cellFar;
-    var streetPeriod = rr < 260 ? 5 : rr < 620 ? 6 : 8; // one street lane every N cells
+    var cell = rr < 260 ? cellNear : rr < 620 ? cellMid : rr < 1150 ? cellFar : cellTaper;
+    var streetPeriod = rr < 260 ? 5 : rr < 620 ? 6 : rr < 1150 ? 8 : 9; // one street lane every N cells
     var circumf = 2 * PI * rr;
     var nAng = Math.max(8, Math.round(circumf / cell));
     for (var ai = 0; ai < nAng; ai++) {
@@ -384,13 +432,27 @@ window.buildTerrain = function (THREE, mats, H) {
       var wx0 = cos(ang) * rr, wz0 = sin(ang) * rr; // world-space offset from the hill centre
       var gx = wx0 * rot0 + wz0 * rot1, gz = -wx0 * rot1 + wz0 * rot0;
       var cix = Math.round(gx / cell), ciz = Math.round(gz / cell);
-      if (cix % streetPeriod === 0 || ciz % streetPeriod === 0) continue; // street gap
+      var isStreet = (cix % streetPeriod === 0 || ciz % streetPeriod === 0);
       var jit = cell * 0.28;
       var jgx = cix * cell + (cityR() - 0.5) * jit, jgz = ciz * cell + (cityR() - 0.5) * jit;
       var world = fromGrid(jgx, jgz);
       var hx = -45 + world[0], hz = world[1];
       if (ellipseE(hx, hz) < 1) continue; // keep off the hill itself
       var yaw = CITY_ROT + ((cix + ciz) % 2 ? PI / 2 : 0) + (cityR() - 0.5) * 0.1; // aligned to the block grid
+      if (isStreet) {
+        // Street gap: lay a couple of short worn-stone paving segments along the lane (near+mid
+        // tier only, and only part of the time) instead of leaving it a flat, featureless gap.
+        if (rr < 620 && cityR() < 0.55) {
+          var worldGrid = fromGrid(cix * cell, ciz * cell);
+          var laneYaw = CITY_ROT + (ciz % streetPeriod === 0 ? 0 : PI / 2);
+          for (var seg = 0; seg < 2; seg++) {
+            var so = (seg - 0.5) * cell * 0.42;
+            var slx = worldGrid[0] + cos(laneYaw) * so, slz = worldGrid[1] + sin(laneYaw) * so;
+            streetT.push({ p: [-45 + slx, -80 + 0.025, slz], r: [0, laneYaw, 0], s: [cell * 0.36, 0.05, cell * 0.62] });
+          }
+        }
+        continue;
+      }
       var special = cityR();
       if (special < 0.035) {
         // Tree clump instead of a house
@@ -410,18 +472,30 @@ window.buildTerrain = function (THREE, mats, H) {
           cityTreeCanopyT.push({ p: [pox, 1.9 * ptsc - 80, poz], s: [ptsc * 0.8, ptsc * 0.7, ptsc * 0.8] });
         }
       } else if (rr < 260) {
-        var sxh = 5 + cityR() * 6, szh = 5 + cityR() * 6, syh = 3.2 + cityR() * 3.2;
+        // Near tier: full 1-6 story range with real variety -- ~40% single-storey cottages,
+        // ~40% ordinary 2-3.5 storey houses, ~20% tall 4-6 storey buildings.
+        var roll1 = cityR(), stories1;
+        if (roll1 < 0.4) stories1 = 1 + cityR() * 0.35;
+        else if (roll1 < 0.8) stories1 = 2 + cityR() * 1.5;
+        else stories1 = 4 + cityR() * 2.2;
+        var sxh = 5 + cityR() * 6, szh = 5 + cityR() * 6, syh = stories1 * storyH;
         houseT.push({ p: [hx, -80 + syh / 2, hz], r: [0, yaw, 0], s: [sxh, syh, szh] });
         roofBuckets[roofVariantAt(hx, hz)].push({ p: [hx, -80 + syh + 0.3 * ((sxh + szh) / 2) * 0.35, hz], r: [0, yaw, 0], s: [(sxh + szh) / 2 * 1.05, (sxh + szh) / 2 * 0.9, (sxh + szh) / 2 * 1.05] });
       } else if (rr < 620) {
-        var sx2 = 6 + cityR() * 11, sz2 = 6 + cityR() * 11, sy2 = 3.6 + cityR() * 6;
+        // Mid tier: kept to 1-2 storeys per the art pass, so height variety concentrates near the hill.
+        var stories2 = 1 + cityR() * 1.1;
+        var sx2 = 6 + cityR() * 11, sz2 = 6 + cityR() * 11, sy2 = stories2 * storyH;
         houseT.push({ p: [hx, -80 + sy2 / 2, hz], r: [0, yaw, 0], s: [sx2, sy2, sz2] });
         roofBuckets[roofVariantAt(hx, hz)].push({ p: [hx, -80 + sy2 + 0.3 * ((sx2 + sz2) / 2) * 0.35, hz], r: [0, yaw, 0], s: [(sx2 + sz2) / 2 * 1.05, (sx2 + sz2) / 2 * 0.9, (sx2 + sz2) / 2 * 1.05] });
-      } else if (rr < 1000) {
-        var sx3 = 6 + cityR() * 14, sz3 = 6 + cityR() * 14, sy3 = 4 + cityR() * 8;
+      } else if (rr < 1150) {
+        var stories3 = 1 + cityR() * 1.1;
+        var sx3 = 6 + cityR() * 14, sz3 = 6 + cityR() * 14, sy3 = stories3 * storyH;
         farT.push({ p: [hx, -80 + sy3 / 2, hz], r: [0, yaw, 0], s: [sx3, sy3, sz3] });
       } else {
-        var sx4 = 3 + cityR() * 5, sz4 = 3 + cityR() * 5, sy4 = 3 + cityR() * 6;
+        // Tapered outer ring (1150-1350m): sparser (bigger cell + coin-flip skip) instead of a
+        // hard cutoff, so the dense city fades gradually into the haze.
+        if (cityR() > 0.7) continue;
+        var sx4 = 3 + cityR() * 5, sz4 = 3 + cityR() * 5, sy4 = (1 + cityR() * 0.8) * storyH;
         microT.push({ p: [hx, -80 + sy4 / 2, hz], r: [0, yaw, 0], s: [sx4, sy4, sz4] });
       }
     }
@@ -435,6 +509,7 @@ window.buildTerrain = function (THREE, mats, H) {
   cityGroup.add(H.instance(new THREE.BoxGeometry(1, 1, 1), mats.city, farT));
   if (microT.length) cityGroup.add(H.instance(new THREE.BoxGeometry(1, 1, 1), mats.city, microT));
   if (parkT.length) cityGroup.add(H.instance(parkGeo, mats.grass, parkT));
+  if (streetT.length) cityGroup.add(H.instance(streetGeo, mats.rock, streetT));
   if (cityTreeTrunkT.length) cityGroup.add(H.instance(treeTrunkGeo, mats.trunk, cityTreeTrunkT));
   if (cityTreeCanopyT.length) cityGroup.add(H.instance(treeCanopyGeo, mats.foliageCypress, cityTreeCanopyT));
   group.add(cityGroup);
@@ -444,7 +519,7 @@ window.buildTerrain = function (THREE, mats, H) {
   // would spend triangles the viewer will never resolve).
   function cheapColonnade(positions, height, r, capMat, shaftMat) {
     var g = new THREE.Group();
-    var shaftGeo = new THREE.CylinderGeometry(r * 0.85, r, height, 8);
+    var shaftGeo = new THREE.CylinderGeometry(r * 0.85, r, height, 6);
     var capGeo2 = new THREE.BoxGeometry(r * 2.6, height * 0.06, r * 2.6);
     var shaftT = [], capT2 = [];
     for (var i = 0; i < positions.length; i++) {
