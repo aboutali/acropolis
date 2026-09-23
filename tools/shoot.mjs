@@ -33,7 +33,7 @@ for (const [label, vp] of [['desk', { width: 1280, height: 800 }], ['phone', { w
     await page.goto(`file://${ROOT}/index.html?view=${custom ? 'overview' : v}&still&debug`, { timeout: 180000 });
     if (custom) {
       await page.waitForTimeout(2500);
-      await page.evaluate(c => window.acropolisCtrl.jumpTo(c), custom);
+      await page.evaluate(c => { window.acropolisCtrl.setAutoRotate(false); window.acropolisCtrl.jumpTo(c); }, custom);
     }
     await page.waitForTimeout(6000);
     const file = path.join(OUT, `${v}-${label}.png`);
