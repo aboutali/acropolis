@@ -8,7 +8,7 @@ window.startAcropolis = function () {
   document.getElementById('app').appendChild(renderer.domElement);
 
   var scene = new THREE.Scene();
-  var camera = new THREE.PerspectiveCamera(48, W / Hh, 0.5, 4000);
+  var camera = new THREE.PerspectiveCamera(48, W / Hh, 0.5, 9000);
   camera.position.set(170, 95, 205);
 
   var mats = window.buildMats(THREE);
@@ -98,6 +98,8 @@ window.startAcropolis = function () {
 
   if (location.search.indexOf('debug') >= 0) {
     window.acropolisCtrl = ctrl;
+    window.acropolisScene = scene;
+    window.acropolisCamera = camera;
     var dbg = document.getElementById('debug');
     if (dbg) {
       dbg.hidden = false;

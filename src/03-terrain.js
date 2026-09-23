@@ -288,7 +288,8 @@ window.buildTerrain = function (THREE, mats, H) {
   group.add(cliffMesh);
 
   // Ground plain
-  var groundGeo = new THREE.PlaneGeometry(3400, 3400, 2, 2);
+  // Reaches past the distant hills (up to ~5.5 km) so they stand on ground
+  var groundGeo = new THREE.PlaneGeometry(16000, 16000, 2, 2);
   groundGeo.rotateX(-PI / 2);
   var groundMesh = new THREE.Mesh(groundGeo, mats.ground);
   groundMesh.position.y = -80.4;

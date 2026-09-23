@@ -248,9 +248,12 @@ window.buildEnv = function (THREE, scene, renderer) {
       // the middle row — this is what gives the range real rounded slopes (and normals the
       // sun can model) instead of a flat vertical ribbon.
       var envelope = Math.sin(Math.PI * Math.pow(rt, 0.85));
-      var rowRadius = radius + (rt - 0.5) * 90;
+      // Depth about three times the peak height so slopes are gentle hills, not a wall
+      var rowRadius = radius + (rt - 0.5) * hMax * 3;
       for (var c = 0; c <= cols; c++) {
         var t = c / cols;
+        // Taper each range toward its ends so it does not stop in a vertical cut
+        var endTaper = Math.pow(Math.sin(Math.PI * t), 0.6);
         var bearing = (b0 + (b1 - b0) * t) * Math.PI / 180;
         var dx = Math.sin(bearing), dz = -Math.cos(bearing);
         var x = cx + dx * rowRadius, z = cz + dz * rowRadius;
@@ -262,7 +265,7 @@ window.buildEnv = function (THREE, scene, renderer) {
         // continuous in c (and varies smoothly row-to-row) so slopes read as rounded terrain
         // down to the finest visible scale instead of jittering off the ridgeline curve.
         var detail = (fbm1D((c / cols) * 17.0 + r * 0.9, seed + 900 + r * 13, 3, 0.5) - 0.5) * 22 * envelope;
-        var y = baseY + envelope * (hMin + (hMax - hMin) * peak[c]) + detail;
+        var y = baseY + envelope * endTaper * (hMin + (hMax - hMin) * peak[c]) + detail * endTaper;
         pos.push(x, y, z);
       }
     }
@@ -289,9 +292,9 @@ window.buildEnv = function (THREE, scene, renderer) {
   // its own warm/cool haze balance ("warm": 1 = warm-grey undertone from raking sun, 0 = cooler
   // grey-purple distant-atmosphere tone) — nearer ranges lean warm, the farthest leans purple.
   var ranges = [
-    { b0: 55, b1: 128, r: 4200, base: -58, hMin: 170, hMax: 310, seed: 71, color: 0x5b6d72, haze: 0.33, warm: 0.45 },   // Hymettus, east (mid distance)
-    { b0: -38, b1: 42, r: 5200, base: -68, hMin: 230, hMax: 400, seed: 133, color: 0x556570, haze: 0.40, warm: 0.15 }, // Parnitha, north (farthest -> palest, most purple)
-    { b0: 232, b1: 306, r: 3900, base: -52, hMin: 150, hMax: 280, seed: 205, color: 0x60717a, haze: 0.28, warm: 0.70 }  // Aigaleo, west (nearest -> least faded, warmest)
+    { b0: 55, b1: 128, r: 4200, base: -90, hMin: 60, hMax: 520, seed: 71, color: 0x5b6d72, haze: 0.33, warm: 0.45 },   // Hymettus, east (mid distance)
+    { b0: -38, b1: 42, r: 5200, base: -90, hMin: 120, hMax: 640, seed: 133, color: 0x556570, haze: 0.40, warm: 0.15 }, // Parnitha, north (farthest -> palest, most purple)
+    { b0: 232, b1: 306, r: 3900, base: -90, hMin: 40, hMax: 380, seed: 205, color: 0x60717a, haze: 0.28, warm: 0.70 }  // Aigaleo, west (nearest -> least faded, warmest)
   ];
   for (var ri = 0; ri < ranges.length; ri++) {
     var rg = ranges[ri];
@@ -309,7 +312,8 @@ window.buildEnv = function (THREE, scene, renderer) {
     var hillCol = new THREE.Color(rg.color).multiplyScalar(0.42).lerp(hazeMix, rg.haze * 0.3);
     var hillMat = new THREE.MeshLambertMaterial({
       color: hillCol, emissive: hazeMix, emissiveIntensity: 0.12 + rg.haze * 0.18,
-      fog: false, side: THREE.DoubleSide
+      // Scene fog applies so the hill bases fade into the same haze as the plain in front
+      fog: true, side: THREE.DoubleSide
     });
     var hillGeo = buildHillGeometry(rg.b0, rg.b1, rg.r, rg.base, rg.hMin, rg.hMax, rg.seed, hillCols, hillRows);
     var hillMesh = new THREE.Mesh(hillGeo, hillMat);
