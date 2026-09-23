@@ -17,14 +17,14 @@ const html = `<title>Acropolis of Athens</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&display=swap">
 <style>
   :root { --ink: #f2ece0; --panel: rgba(20, 24, 30, .62); --accent: #e3c78a; }
-  #legend h1 { font-family: Cinzel, "Trajan Pro", Georgia, serif; letter-spacing: .08em; text-transform: uppercase; }
   html, body { height: 100%; }
   body { margin: 0; overflow: hidden; background: #87b6de; color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  #app { position: fixed; inset: 0; }
+  #app { position: fixed; inset: 0; z-index: 0; }
+  #legend, #hint, #autorot, #debug { z-index: 5; }
   #app canvas { display: block; width: 100% !important; height: 100% !important; touch-action: none; }
   #legend { position: fixed; left: 12px; bottom: 12px; max-width: min(300px, 46vw); padding: 10px 12px; border-radius: 10px;
     background: var(--panel); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); font-size: 12px; line-height: 1.5; }
-  #legend h1 { margin: 0 0 4px; font-size: 14px; font-weight: 600; letter-spacing: .02em; color: var(--accent); }
+  #legend h1 { margin: 0 0 4px; font: 600 14px/1.3 Cinzel, "Trajan Pro", Georgia, serif; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
   #legend ul { margin: 0; padding: 0; list-style: none; }
   #legend li::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; background: var(--dot, #e8e0cf); vertical-align: middle; }
   #hint { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 12px; border-radius: 999px; background: var(--panel);

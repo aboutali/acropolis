@@ -71,7 +71,7 @@ window.makeHelpers = function (THREE, mats) {
       var theta = atan2(pz, px);
       var r = sqrt(px * px + pz * pz);
       var yN = (py + shaftH / 2) / shaftH;
-      var newR = r * (1 - 0.035 * (0.5 + 0.5 * cos(flutes * theta))) * (1 + entasis * sin(PI * yN));
+      var newR = r * (1 - 0.055 * (0.5 + 0.5 * cos(flutes * theta))) * (1 + entasis * sin(PI * yN));
       posArray[i] = newR * cos(theta);
       posArray[i + 2] = newR * sin(theta);
     }

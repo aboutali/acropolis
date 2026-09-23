@@ -22,6 +22,20 @@ window.buildSouthSlope = function (THREE, mats, H) {
     cavMesh.rotation.y = Math.PI;
     cavMesh.position.y = i * 0.6;
     theatreGroup.add(cavMesh);
+
+    // Add tread for this row
+    if (i < 23) {
+      var rInner = r;
+      var rOuter = 22 + (i + 1) * 1.05;
+      var treadGeom = new THREE.RingGeometry(rInner, rOuter, 40, 1, -1.75, 3.5);
+      var treadMesh = new THREE.Mesh(treadGeom, mats.marble);
+      treadMesh.rotation.x = -Math.PI / 2;
+      treadMesh.rotation.y = Math.PI;
+      treadMesh.position.y = i * 0.6 + 0.3;
+      treadMesh.receiveShadow = true;
+      treadMesh.castShadow = false;
+      theatreGroup.add(treadMesh);
+    }
   }
 
   // Orchestra
@@ -56,6 +70,20 @@ window.buildSouthSlope = function (THREE, mats, H) {
     odMesh.rotation.y = Math.PI;
     odMesh.position.y = i * 0.8;
     odeonGroup.add(odMesh);
+
+    // Add tread for this row
+    if (i < 17) {
+      var rInner = r;
+      var rOuter = 14 + (i + 1) * 1.33;
+      var treadGeom = new THREE.RingGeometry(rInner, rOuter, 40, 1, -1.571, 3.142);
+      var treadMesh = new THREE.Mesh(treadGeom, mats.marble);
+      treadMesh.rotation.x = -Math.PI / 2;
+      treadMesh.rotation.y = Math.PI;
+      treadMesh.position.y = i * 0.8 + 0.4;
+      treadMesh.receiveShadow = true;
+      treadMesh.castShadow = false;
+      odeonGroup.add(treadMesh);
+    }
   }
 
   // Half-disc orchestra
