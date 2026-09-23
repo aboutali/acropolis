@@ -187,11 +187,11 @@ window.buildMats = function (THREE) {
   // browser) get flat-color materials so the module never throws.
   if (!HAS_DOC) {
     function flat(hex, rough, metal) { return new THREE.MeshStandardMaterial({ color: hex, roughness: rough, metalness: metal || 0 }); }
-    mats.marble = flat(0xe4d8ba, 0.72); mats.marbleWorn = flat(0xcfbd96, 0.85); mats.marbleShadowed = flat(0xb9ac8f, 0.88);
-    mats.rock = flat(0xa2957a, 0.95); mats.rockDark = flat(0x7d735f, 0.97); mats.ground = flat(0xa08a63, 0.98);
-    mats.city = flat(0xcfc4ab, 0.9); mats.terracotta = flat(0xb0603a, 0.75); mats.bronze = flat(0x5a4a34, 0.4, 0.9);
+    mats.marble = flat(0xe9decc, 0.72); mats.marbleWorn = flat(0xd6c9ac, 0.85); mats.marbleShadowed = flat(0xc4b89c, 0.88);
+    mats.rock = flat(0xa2957a, 0.95); mats.rockDark = flat(0x7d735f, 0.97); mats.ground = flat(0xb2a896, 0.98);
+    mats.city = flat(0xcfc4ab, 0.9); mats.terracotta = flat(0xa05f46, 0.75); mats.bronze = flat(0x63503a, 0.4, 0.9);
     mats.foliageOlive = flat(0x6e7b57, 0.95); mats.foliageCypress = flat(0x38492f, 0.95); mats.trunk = flat(0x584634, 0.95);
-    mats.marbleStatue = flat(0xe9e0c8, 0.5); mats.marbleRelief = flat(0xcfbd96, 0.85); mats.bronzePatina = flat(0x4c6656, 0.7, 0.4);
+    mats.marbleStatue = flat(0xe9e0c8, 0.5); mats.marbleRelief = flat(0xd6c9ac, 0.85); mats.bronzePatina = flat(0x5a7869, 0.7, 0.5);
     mats.gold = flat(0xc9a04a, 0.3, 1); mats.ivory = flat(0xf0e6cf, 0.5); mats.grass = flat(0x8c8552, 0.95);
     mats.scrub = flat(0x7c7848, 0.95); mats.plaster = flat(0xe0d6c2, 0.9);
     mats.finishScene = function () {};
@@ -224,14 +224,14 @@ window.buildMats = function (THREE) {
         var crackWarpV = v + (fbmTile(u, v, seed + 812, 6, 6, 3, 0.5) - 0.5) * 0.18;
         var crackN = ridgeTile(crackWarpU, crackWarpV, seed + 950, 27, 27, 7);
         var crackAmt = smooth(0.8, 0.965, crackN);
-        height[i] = clamp01(0.5 + (grain - 0.5) * 0.5 - vn * 0.35 - crackAmt * 0.42);
+        height[i] = clamp01(0.5 + (grain - 0.5) * 0.5 - vn * 0.12 - crackAmt * 0.17);
         vein[i] = vn; patina[i] = pn; streak[i] = clamp01(sk);
-        var base = [241, 222, 180];        // warmer, more golden honey/cream Pentelic base
-        var veinCol = [180, 174, 160];
-        var patinaCol = [191, 133, 56];    // more saturated iron-oxide patina
-        var c = lerpC(base, veinCol, vn * 0.55);
-        c = lerpC(c, patinaCol, pn * 0.48);
-        var gshade = (grain - 0.5) * 26 - crackAmt * 16;
+        var base = [233, 222, 200];        // creamy white Pentelic base (art-director spec)
+        var veinCol = [196, 188, 172];
+        var patinaCol = [214, 190, 150];   // soft honey/ochre wash (art-director spec)
+        var c = lerpC(base, veinCol, vn * 0.35);
+        c = lerpC(c, patinaCol, pn * 0.28);
+        var gshade = (grain - 0.5) * 26 - crackAmt * 6;
         var di = i * 4;
         color[di] = byte(c[0] + gshade); color[di + 1] = byte(c[1] + gshade * 0.92); color[di + 2] = byte(c[2] + gshade * 0.8); color[di + 3] = 255;
       }
@@ -276,20 +276,20 @@ window.buildMats = function (THREE) {
   // normalStrength (the Sobel gradient multiplier) raised ~1.5x across the marble family so
   // crystalline grain, tool-marks and the new crack network read with real physical relief
   // instead of looking airbrushed; normalScale raised into the 1.5-2.0 range to match.
-  var mA = paintMarbleVariant(marbleFieldA, { patina: 0.38, streak: 0.24, grime: 0.24, darken: 1.0, roughBase: 0.6, roughVar: 0.22, normalStrength: 3.3, grainAmt: 0.03, sparkleAmt: 0.01, seed: 11 });
-  mats.marble = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: mA.map, normalMap: mA.normalMap, roughnessMap: mA.roughnessMap, normalScale: new THREE.Vector2(1.7, 1.7) });
+  var mA = paintMarbleVariant(marbleFieldA, { patina: 0.30, streak: 0.15, grime: 0.12, darken: 1.0, roughBase: 0.6, roughVar: 0.22, normalStrength: 2.2, grainAmt: 0.03, sparkleAmt: 0.01, seed: 11 });
+  mats.marble = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: mA.map, normalMap: mA.normalMap, roughnessMap: mA.roughnessMap, normalScale: new THREE.Vector2(1.3, 1.3) });
 
-  var mW = paintMarbleVariant(marbleFieldA, { patina: 0.72, streak: 0.64, grime: 0.6, darken: 0.8, roughBase: 0.8, roughVar: 0.18, normalStrength: 3.45, grainAmt: 0.032, sparkleAmt: 0.006, seed: 12 });
-  mats.marbleWorn = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: mW.map, normalMap: mW.normalMap, roughnessMap: mW.roughnessMap, normalScale: new THREE.Vector2(1.9, 1.9) });
+  var mW = paintMarbleVariant(marbleFieldA, { patina: 0.45, streak: 0.35, grime: 0.28, darken: 0.92, roughBase: 0.8, roughVar: 0.18, normalStrength: 2.3, grainAmt: 0.032, sparkleAmt: 0.006, seed: 12 });
+  mats.marbleWorn = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: mW.map, normalMap: mW.normalMap, roughnessMap: mW.roughnessMap, normalScale: new THREE.Vector2(1.4, 1.4) });
 
-  var mS = paintMarbleVariant(marbleFieldA, { patina: 0.4, streak: 0.32, grime: 0.55, darken: 0.6, roughBase: 0.85, roughVar: 0.12, normalStrength: 3.3, grainAmt: 0.02, seed: 13 });
-  mats.marbleShadowed = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: mS.map, normalMap: mS.normalMap, roughnessMap: mS.roughnessMap, normalScale: new THREE.Vector2(1.6, 1.6) });
+  var mS = paintMarbleVariant(marbleFieldA, { patina: 0.30, streak: 0.20, grime: 0.30, darken: 0.72, roughBase: 0.85, roughVar: 0.12, normalStrength: 2.2, grainAmt: 0.02, seed: 13 });
+  mats.marbleShadowed = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: mS.map, normalMap: mS.normalMap, roughnessMap: mS.roughnessMap, normalScale: new THREE.Vector2(1.2, 1.2) });
 
-  var mR = paintMarbleVariant(marbleFieldA, { patina: 0.58, streak: 0.42, grime: 0.4, darken: 0.88, roughBase: 0.76, roughVar: 0.16, normalStrength: 2.4, grainAmt: 0.026, seed: 14 });
-  mats.marbleRelief = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: mR.map, normalMap: mR.normalMap, roughnessMap: mR.roughnessMap, normalScale: new THREE.Vector2(1.1, 1.1) });
+  var mR = paintMarbleVariant(marbleFieldA, { patina: 0.38, streak: 0.25, grime: 0.20, darken: 0.9, roughBase: 0.76, roughVar: 0.16, normalStrength: 1.7, grainAmt: 0.026, seed: 14 });
+  mats.marbleRelief = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: mR.map, normalMap: mR.normalMap, roughnessMap: mR.roughnessMap, normalScale: new THREE.Vector2(0.9, 0.9) });
 
-  var mSt = paintMarbleVariant(marbleFieldB, { patina: 0.08, streak: 0.04, grime: 0.08, darken: 1.03, roughBase: 0.4, roughVar: 0.1, normalStrength: 1.95, grainAmt: 0.014, sparkleAmt: 0.014, seed: 15 });
-  mats.marbleStatue = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: mSt.map, normalMap: mSt.normalMap, roughnessMap: mSt.roughnessMap, normalScale: new THREE.Vector2(0.6, 0.6) });
+  var mSt = paintMarbleVariant(marbleFieldB, { patina: 0.18, streak: 0.08, grime: 0.12, darken: 1.0, roughBase: 0.4, roughVar: 0.1, normalStrength: 1.4, grainAmt: 0.024, sparkleAmt: 0.014, seed: 15 });
+  mats.marbleStatue = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: mSt.map, normalMap: mSt.normalMap, roughnessMap: mSt.roughnessMap, normalScale: new THREE.Vector2(0.5, 0.5) });
 
   addGroundGrime(mats.marble, true); addGroundGrime(mats.marbleWorn, true); addGroundGrime(mats.marbleShadowed, true); addGroundGrime(mats.marbleRelief, true);
 
@@ -301,7 +301,7 @@ window.buildMats = function (THREE) {
     var height = new Float32Array(res * res);
     var rough = new Float32Array(res * res);
     var x, y;
-    var stone = [176, 158, 122], band = [128, 112, 82], crack = [64, 56, 44], lichen = [134, 146, 88];
+    var stone = [176, 158, 122], band = [140, 124, 94], crack = [86, 76, 62], lichen = [134, 146, 88];
     // Fixed seeded phase offsets for the multi-frequency strata sines (deterministic hash, no RNG).
     var hp1 = hashP(1, 3, seed + 11, 97, 97) * 6.28318;
     var hp2 = hashP(5, 2, seed + 12, 97, 97) * 6.28318;
@@ -343,11 +343,11 @@ window.buildMats = function (THREE) {
         var grain = fbmTile(u, v, seed + 55, 16, 16, 3, 0.5);
         height[i] = clamp01(0.5 + (bandMask - 0.5) * 0.45 + (grain - 0.5) * 0.4 - crackMask * 0.5 - jointMask * 0.5 - bandEdge * 0.4);
         rough[i] = clamp01(0.85 + crackMask * 0.1 + jointMask * 0.06 - lichenMask * 0.06 + (grain - 0.5) * 0.06);
-        var c = lerpC(stone, band, bandMask * 0.75);
-        c = lerpC(c, crack, crackMask);
-        c = lerpC(c, crack, jointMask * 0.6);
+        var c = lerpC(stone, band, bandMask * 0.65);
+        c = lerpC(c, crack, crackMask * 0.55);
+        c = lerpC(c, crack, jointMask * 0.35);
         c = lerpC(c, lichen, lichenMask);
-        var gshade = (grain - 0.5) * 26 - jointMask * 14 - bandEdge * 16;
+        var gshade = (grain - 0.5) * 26 - jointMask * 8 - bandEdge * 9;
         var di = i * 4;
         color[di] = byte(c[0] + gshade); color[di + 1] = byte(c[1] + gshade * 0.92); color[di + 2] = byte(c[2] + gshade * 0.8); color[di + 3] = 255;
       }
@@ -381,7 +381,7 @@ window.buildMats = function (THREE) {
   // =================================================================
   (function () {
     var res = GEN, color = new Uint8ClampedArray(res * res * 4), height = new Float32Array(res * res), rough = new Uint8ClampedArray(res * res * 4);
-    var soil = [172, 142, 100], soilDark = [140, 114, 78], pebbleLt = [198, 184, 152], pebbleDk = [112, 98, 76], fleck = [150, 146, 84];
+    var soil = [178, 168, 150], soilDark = [155, 146, 128], pebbleLt = [196, 188, 170], pebbleDk = [130, 122, 106], fleck = [172, 162, 142];
     var x, y;
     for (y = 0; y < res; y++) {
       var v = (y + 0.5) / res;
@@ -389,14 +389,14 @@ window.buildMats = function (THREE) {
         var u = (x + 0.5) / res, i = y * res + x;
         // Two independently-oriented, higher-frequency warped fields multiplied together
         // break up any single-frequency repeat (avoids a "wavy fingerprint" look tiled).
-        var soilA = warpTile(u, v, 3301, 18, 21, 4, 0.55, 0.3);
-        var soilB = warpTile(u, v, 3355, 23, 15, 3, 0.5, 0.3);
+        var soilA = warpTile(u, v, 3301, 24, 27, 4, 0.55, 0.3);
+        var soilB = warpTile(u, v, 3355, 29, 21, 3, 0.5, 0.3);
         var soilN = clamp01(soilA * 0.55 + soilB * 0.45);
         var pebN = ridgeTile(u, v, 3402, 23, 29, 2) * ridgeTile(u, v, 3450, 31, 19, 2);
-        var pebMask = smooth(0.55, 0.85, pebN);
+        var pebMask = smooth(0.65, 0.92, pebN);
         var pebDark = fastHash((x / 3) | 0, (y / 3) | 0, 3500) > 0.5;
-        var fleckMask = smooth(0.9, 0.98, fbmTile(u, v, 3600, 40, 40, 2, 0.5)) * 0.6;
-        height[i] = clamp01(0.5 + (soilN - 0.5) * 0.22 + pebMask * 0.45);
+        var fleckMask = smooth(0.9, 0.98, fbmTile(u, v, 3600, 40, 40, 2, 0.5)) * 0.25;
+        height[i] = clamp01(0.5 + (soilN - 0.5) * 0.18 + pebMask * 0.25);
         var c = lerpC(soil, soilDark, soilN);
         c = lerpC(c, pebDark ? pebbleDk : pebbleLt, pebMask);
         c = lerpC(c, fleck, fleckMask);
@@ -448,7 +448,7 @@ window.buildMats = function (THREE) {
       var n = clamp01(warp1 * 0.6 + warp2 * 0.4);
       var fire = fbmTile(u, v, 4501, 4, 5, 4, 0.5);                      // asymmetric freq avoids single-axis bias
       var patchN = smooth(0.35, 0.75, warpTile(u, v, 4551, 6, 7, 4, 0.5, 0.5)); // firing/weathering patches
-      var base = [178, 96, 58], hot = [202, 128, 84], cool = [136, 70, 44], patchCol = [160, 82, 48];
+      var base = [160, 95, 70], hot = [178, 118, 92], cool = [128, 82, 64], patchCol = [150, 96, 74];
       var c = lerpC(cool, hot, fire);
       c = lerpC(c, base, 0.35);
       c = lerpC(c, patchCol, patchN * 0.4);
@@ -466,7 +466,7 @@ window.buildMats = function (THREE) {
     var color = new Uint8ClampedArray(res * res * 4), rm = new Uint8ClampedArray(res * res * 4);
     var patinaC = new Uint8ClampedArray(res * res * 4), patinaRM = new Uint8ClampedArray(res * res * 4);
     var flakeHeight = new Float32Array(res * res); // dedicated crackle/flake field for bronzePatina's normal map
-    var dark = [46, 38, 28], warm = [96, 76, 50], verdigris = [76, 159, 100], verdigrisDk = [46, 75, 63];
+    var dark = [58, 45, 32], warm = [104, 84, 56], verdigris = [90, 120, 105], verdigrisDk = [64, 88, 80];
     var x, y;
     for (y = 0; y < res; y++) {
       var v = (y + 0.5) / res;
@@ -480,13 +480,13 @@ window.buildMats = function (THREE) {
         var rough = clamp01(0.32 + (1 - streak) * 0.2 + (fleck - 0.5) * 0.1);
         rm[di] = 255; rm[di + 1] = byte(rough * 255); rm[di + 2] = byte(0.92 * 255); rm[di + 3] = 255;
 
-        var patch = smooth(0.48, 0.78, warpTile(u, v, 5701, 3, 3, 4, 0.5, 0.5));
+        var patch = smooth(0.62, 0.9, warpTile(u, v, 5701, 3, 3, 4, 0.5, 0.5));
         var patchDetail = fbmTile(u, v, 5801, 12, 12, 3, 0.5);
-        var pc = lerpC(c, patch > 0.5 ? verdigris : verdigrisDk, patch);
+        var pc = lerpC(c, patch > 0.5 ? verdigris : verdigrisDk, patch * 0.8);
         var pg = (patchDetail - 0.5) * 14;
         patinaC[di] = byte(pc[0] + pg); patinaC[di + 1] = byte(pc[1] + pg); patinaC[di + 2] = byte(pc[2] + pg * 0.8); patinaC[di + 3] = 255;
-        var prough = clamp01(rough + patch * 0.5);
-        var pmetal = clamp01(0.9 - patch * 0.75);
+        var prough = clamp01(rough + patch * 0.4);
+        var pmetal = clamp01(0.85 - patch * 0.4);
         patinaRM[di] = 255; patinaRM[di + 1] = byte(prough * 255); patinaRM[di + 2] = byte(pmetal * 255); patinaRM[di + 3] = 255;
 
         // Fine crystalline crackle/flake detail (fbm of ridges), independent of roughness,
@@ -542,7 +542,7 @@ window.buildMats = function (THREE) {
   (function () {
     var res = GEN_S, plasterC = new Uint8ClampedArray(res * res * 4), cityC = new Uint8ClampedArray(res * res * 4);
     var plasterRM = new Uint8ClampedArray(res * res * 4), cityRM = new Uint8ClampedArray(res * res * 4);
-    var base = [227, 219, 199], patch = [206, 197, 172], dirt = [146, 138, 116], blotchCol = [193, 183, 156];
+    var base = [231, 222, 201], patch = [214, 204, 180], dirt = [156, 147, 124], blotchCol = [202, 191, 165];
     var x, y;
     for (y = 0; y < res; y++) {
       var v = (y + 0.5) / res;
@@ -553,13 +553,13 @@ window.buildMats = function (THREE) {
         // uneven patches of the wall, not a uniform speckle.
         var blotchN = fbmTile(u, v, 8850, 3, 3, 3, 0.5);
         var blotchMask = smooth(0.42, 0.78, blotchN);
-        var c = lerpC(base, patch, n * 0.5);
-        c = lerpC(c, blotchCol, blotchMask * 0.4);
+        var c = lerpC(base, patch, n * 0.4);
+        c = lerpC(c, blotchCol, blotchMask * 0.28);
         plasterC[di] = byte(c[0]); plasterC[di + 1] = byte(c[1]); plasterC[di + 2] = byte(c[2]); plasterC[di + 3] = 255;
         plasterRM[di] = 255; plasterRM[di + 1] = byte(clamp01(0.82 + (n - 0.5) * 0.14 + blotchMask * 0.12) * 255); plasterRM[di + 2] = 0; plasterRM[di + 3] = 255;
 
         var streak = warpTile(u, v * 0.4, 8901, 3, 9, 4, 0.5, 0.25);
-        var grime = smooth(0.5, 0.85, streak) * 0.5;
+        var grime = smooth(0.5, 0.85, streak) * 0.35;
         var cc = lerpC(c, dirt, grime);
         cityC[di] = byte(cc[0]); cityC[di + 1] = byte(cc[1]); cityC[di + 2] = byte(cc[2]); cityC[di + 3] = 255;
         cityRM[di] = 255; cityRM[di + 1] = byte(clamp01(0.85 + grime * 0.1 + blotchMask * 0.1) * 255); cityRM[di + 2] = 0; cityRM[di + 3] = 255;
@@ -623,8 +623,8 @@ window.buildMats = function (THREE) {
   // Real-world-scale tile sizes (metres per texture repeat), read by finishScene.
   // ---------------------------------------------------------------
   var UV_SCALE = {
-    marble: 3, marbleWorn: 3, marbleShadowed: 3.2, marbleStatue: 1.1, marbleRelief: 1.6,
-    rock: 10, rockDark: 8, ground: 5, city: 4, terracotta: 1.4,
+    marble: 1.3, marbleWorn: 1.3, marbleShadowed: 1.4, marbleStatue: 0.9, marbleRelief: 1.3,
+    rock: 10, rockDark: 8, ground: 2.5, city: 4, terracotta: 1.4,
     bronze: 2, bronzePatina: 2, foliageOlive: 3, foliageCypress: 3, trunk: 1.1,
     gold: 1, ivory: 1.4, grass: 6, scrub: 4, plaster: 3,
   };
