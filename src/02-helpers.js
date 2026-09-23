@@ -693,5 +693,8 @@ window.makeHelpers = function (THREE, mats) {
     return H.instance(blockGeo, mats.marbleWorn, transforms);
   };
 
+  // 13-figures.js replaces the figure helpers and adds statues and reliefs
+  if (window.addFigureHelpers) window.addFigureHelpers(THREE, mats, H);
+
   return H;
 };

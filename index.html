@@ -89,6 +89,19 @@ window.buildMats = function (THREE) {
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     return tex;
   }
+  // Placeholders until the realism pass gives each its own texture
+  function addRealismMats(m) {
+    m.marbleStatue = m.marble;
+    m.marbleRelief = m.marbleWorn;
+    m.bronzePatina = m.bronze;
+    m.gold = new THREE.MeshStandardMaterial({color: 0xd4a640, roughness: 0.3, metalness: 1});
+    m.ivory = new THREE.MeshStandardMaterial({color: 0xf1e6cf, roughness: 0.5, metalness: 0});
+    m.grass = new THREE.MeshStandardMaterial({color: 0x7d7a4a, roughness: 1, metalness: 0});
+    m.scrub = m.foliageOlive;
+    m.plaster = new THREE.MeshStandardMaterial({color: 0xe0d6c2, roughness: 0.95, metalness: 0});
+    // Post-pass hook called by main once the scene is built
+    m.finishScene = function (scene) {};
+  }
   var mats = {};
   if (typeof document === 'undefined') {
     mats.marble = new THREE.MeshStandardMaterial({color: 0xe8e0cf, roughness: 0.75, metalness: 0});
@@ -103,6 +116,7 @@ window.buildMats = function (THREE) {
     mats.foliageOlive = new THREE.MeshStandardMaterial({color: 0x6e7b57, roughness: 1.0, metalness: 0, flatShading: true});
     mats.foliageCypress = new THREE.MeshStandardMaterial({color: 0x38492f, roughness: 1.0, metalness: 0, flatShading: true});
     mats.trunk = new THREE.MeshStandardMaterial({color: 0x584634, roughness: 1.0, metalness: 0});
+    addRealismMats(mats);
     return mats;
   }
   var marbleTex = noiseTex(256, 0.08, '#e8e0cf');
@@ -129,6 +143,7 @@ window.buildMats = function (THREE) {
   mats.foliageOlive = new THREE.MeshStandardMaterial({color: 0x6e7b57, roughness: 1.0, metalness: 0, flatShading: true});
   mats.foliageCypress = new THREE.MeshStandardMaterial({color: 0x38492f, roughness: 1.0, metalness: 0, flatShading: true});
   mats.trunk = new THREE.MeshStandardMaterial({color: 0x584634, roughness: 1.0, metalness: 0});
+  addRealismMats(mats);
   return mats;
 };
 
@@ -828,6 +843,9 @@ window.makeHelpers = function (THREE, mats) {
 
     return H.instance(blockGeo, mats.marbleWorn, transforms);
   };
+
+  // 13-figures.js replaces the figure helpers and adds statues and reliefs
+  if (window.addFigureHelpers) window.addFigureHelpers(THREE, mats, H);
 
   return H;
 };
@@ -1828,39 +1846,9 @@ window.buildScenery = function (THREE, mats, H) {
     return s / 4294967296;
   }
 
-  // Athena Promachos at (-62, 0, -12)
-  var promachos = new THREE.Group();
+  // Athena Promachos at (-62, 0, -12), built by 13-figures.js
+  var promachos = H.makePromachos({});
   promachos.position.set(-62, 0, -12);
-
-  var plinth = new THREE.Mesh(
-    new THREE.BoxGeometry(3, 2.5, 3),
-    mats.marble
-  );
-  plinth.position.y = 1.25;
-  plinth.castShadow = true;
-  plinth.receiveShadow = true;
-  promachos.add(plinth);
-
-  var fig = H.makeFigure(9.0);
-  fig.position.y = 2.5;
-  fig.traverse(function (o) {
-    if (o.isMesh) {
-      o.material = mats.bronze;
-      o.castShadow = true;
-      o.receiveShadow = true;
-    }
-  });
-  promachos.add(fig);
-
-  var spear = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.08, 0.08, 11, 6),
-    mats.bronze
-  );
-  spear.position.set(-62 + 1.2, 2.5 + 5.5, -12);
-  spear.castShadow = true;
-  spear.receiveShadow = true;
-  group.add(spear);
-
   group.add(promachos);
 
   // Great Altar at (-8, 0, -41)
@@ -2207,6 +2195,7 @@ window.startAcropolis = function () {
   });
 
   var env = window.buildEnv(THREE, scene, renderer);
+  if (mats.finishScene) mats.finishScene(scene, renderer);
   var ctrl = window.makeOrbit(THREE, camera, renderer.domElement, { target: new THREE.Vector3(-30, 8, 0) });
 
   // Camera presets: ?view=<name> on load, legend buttons at runtime
@@ -2290,6 +2279,48 @@ window.startAcropolis = function () {
       }, 500);
     }
   }
+};
+
+</script>
+<script data-module="13-figures.js">
+// Module 13: figure helpers (statues, caryatids, reliefs), installed onto H by makeHelpers
+window.addFigureHelpers = function (THREE, mats, H) {
+  var baseFigure = H.makeFigure, baseCaryatid = H.makeCaryatid;
+
+  // height in metres; o.pose: 'stand' | 'kneel' | 'recline'
+  H.makeFigure = function (height, o) {
+    return baseFigure(height);
+  };
+
+  H.makeCaryatid = function (height) {
+    return baseCaryatid(height);
+  };
+
+  // o: { height, pose, material }
+  H.makeStatue = function (o) {
+    o = o || {};
+    var g = baseFigure(o.height || 2);
+    if (o.material) g.traverse(function (m) { if (m.isMesh) m.material = o.material; });
+    return g;
+  };
+
+  // Relief panel w x h metres, depth d; o.figures: count
+  H.makeRelief = function (w, h, o) {
+    var m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.2), mats.marbleRelief || mats.marble);
+    return m;
+  };
+
+  // Athena Promachos with plinth; origin at the plinth base
+  H.makePromachos = function (o) {
+    var g = new THREE.Group();
+    var plinth = new THREE.Mesh(new THREE.BoxGeometry(3, 2.5, 3), mats.marble);
+    plinth.position.y = 1.25;
+    g.add(plinth);
+    var fig = H.makeStatue({ height: 9, material: mats.bronzePatina || mats.bronze });
+    fig.position.y = 2.5;
+    g.add(fig);
+    return g;
+  };
 };
 
 </script>

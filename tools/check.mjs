@@ -11,11 +11,15 @@ const H_NAMES = ['makeDoricColumns', 'makeIonicColumns', 'makeSteppedBase', 'mak
   'makeGableRoof', 'makeCaryatid', 'makeFigure', 'makeWall', 'makeRockOutcrop', 'makeCella', 'makeBlockCourse',
   'noise2', 'instance'];
 const MAT_NAMES = ['marble', 'marbleWorn', 'marbleShadowed', 'rock', 'rockDark', 'ground', 'city', 'terracotta',
-  'bronze', 'foliageOlive', 'foliageCypress', 'trunk'];
+  'bronze', 'foliageOlive', 'foliageCypress', 'trunk',
+  // realism pass: statue marble, relief marble, patinated bronze, gilding, ivory, grass, dry scrub, painted plaster
+  'marbleStatue', 'marbleRelief', 'bronzePatina', 'gold', 'ivory', 'grass', 'scrub', 'plaster'];
+// Helpers added by 13-figures.js on top of makeHelpers
+const FIG_NAMES = ['makeFigure', 'makeCaryatid', 'makeStatue', 'makeRelief', 'makePromachos'];
 const EXPORTS = {
   '00': 'CFG', '01': 'buildMats', '02': 'makeHelpers', '03': 'buildTerrain', '04': 'buildParthenon',
   '05': 'buildErechtheion', '06': 'buildPropylaea', '07': 'buildWalls', '08': 'buildSouthSlope',
-  '09': 'buildScenery', '10': 'buildEnv', '11': 'makeOrbit', '12': 'startAcropolis',
+  '09': 'buildScenery', '10': 'buildEnv', '11': 'makeOrbit', '12': 'startAcropolis', '13': 'addFigureHelpers',
 };
 const FORBIDDEN = /BufferGeometryUtils|OrbitControls|mergeBufferGeometries|THREE\.Geometry\b|TextureLoader|GLTFLoader|\bfetch\s*\(|https?:\/\/|\brequire\s*\(|^\s*import\s|^\s*export\s|Math\.random|```/m;
 
@@ -64,7 +68,7 @@ function checkFile(file) {
   if (n >= 2 && n <= 11 && /\bdocument\b/.test(code) && n !== 1) problems.push('uses "document" (not allowed in this module)');
   if (n >= 2 && n <= 9 && /new\s+THREE\.\w*Material/.test(code)) problems.push('constructs a Material (use mats.* instead)');
   if (n >= 3 && n <= 9) {
-    for (const h of new Set([...code.matchAll(/\bH\.(\w+)/g)].map(x => x[1]))) if (!H_NAMES.includes(h)) problems.push(`unknown helper H.${h}`);
+    for (const h of new Set([...code.matchAll(/\bH\.(\w+)/g)].map(x => x[1]))) if (!H_NAMES.includes(h) && !FIG_NAMES.includes(h)) problems.push(`unknown helper H.${h}`);
     for (const k of new Set([...code.matchAll(/\bmats\.(\w+)/g)].map(x => x[1]))) if (!MAT_NAMES.includes(k)) problems.push(`unknown material mats.${k}`);
   }
   if (n === 2) {
@@ -104,7 +108,7 @@ function checkFile(file) {
       }
     } else if (n >= 3 && n <= 9) {
       const mats = Object.fromEntries(MAT_NAMES.map(k => [k, stubObj(nanLog)]));
-      const H = Object.fromEntries(H_NAMES.map(k => [k, k === 'noise2' ? () => 0.3 : () => stubObj(nanLog)]));
+      const H = Object.fromEntries([...H_NAMES, ...FIG_NAMES].map(k => [k, k === 'noise2' ? () => 0.3 : () => stubObj(nanLog)]));
       const g = result(THREE, mats, H);
       if (!g) problems.push('builder returned nothing');
     } else if (n === 10) {
@@ -120,6 +124,15 @@ function checkFile(file) {
       win.makeOrbit = () => ({ update() {}, setAutoRotate() {} });
       win.innerWidth = 1440; win.innerHeight = 900; win.addEventListener = () => 0;
       result();
+    } else if (n === 13) {
+      const mats = Object.fromEntries(MAT_NAMES.map(k => [k, stubObj(nanLog)]));
+      const H = Object.fromEntries(H_NAMES.map(k => [k, k === 'noise2' ? () => 0.3 : () => stubObj(nanLog)]));
+      result(THREE, mats, H);
+      const samples = { makeFigure: [1.8, {}], makeCaryatid: [2.3], makeStatue: [{ height: 2 }], makeRelief: [4, 1, {}], makePromachos: [{}] };
+      for (const h of FIG_NAMES) {
+        if (typeof H[h] !== 'function') { problems.push(`H.${h} not defined by addFigureHelpers`); continue; }
+        try { if (!H[h](...samples[h])) problems.push(`H.${h} returned nothing`); } catch (e) { problems.push(`H.${h} threw: ${e.message}`); }
+      }
     }
     if (nanLog.length) problems.push(`NaN passed to ${nanLog.slice(0, 5).join(', ')}${nanLog.length > 5 ? ' …' : ''}`);
   } catch (e) {

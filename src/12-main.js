@@ -23,6 +23,7 @@ window.startAcropolis = function () {
   });
 
   var env = window.buildEnv(THREE, scene, renderer);
+  if (mats.finishScene) mats.finishScene(scene, renderer);
   var ctrl = window.makeOrbit(THREE, camera, renderer.domElement, { target: new THREE.Vector3(-30, 8, 0) });
 
   // Camera presets: ?view=<name> on load, legend buttons at runtime

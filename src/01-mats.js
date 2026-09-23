@@ -31,6 +31,19 @@ window.buildMats = function (THREE) {
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     return tex;
   }
+  // Placeholders until the realism pass gives each its own texture
+  function addRealismMats(m) {
+    m.marbleStatue = m.marble;
+    m.marbleRelief = m.marbleWorn;
+    m.bronzePatina = m.bronze;
+    m.gold = new THREE.MeshStandardMaterial({color: 0xd4a640, roughness: 0.3, metalness: 1});
+    m.ivory = new THREE.MeshStandardMaterial({color: 0xf1e6cf, roughness: 0.5, metalness: 0});
+    m.grass = new THREE.MeshStandardMaterial({color: 0x7d7a4a, roughness: 1, metalness: 0});
+    m.scrub = m.foliageOlive;
+    m.plaster = new THREE.MeshStandardMaterial({color: 0xe0d6c2, roughness: 0.95, metalness: 0});
+    // Post-pass hook called by main once the scene is built
+    m.finishScene = function (scene) {};
+  }
   var mats = {};
   if (typeof document === 'undefined') {
     mats.marble = new THREE.MeshStandardMaterial({color: 0xe8e0cf, roughness: 0.75, metalness: 0});
@@ -45,6 +58,7 @@ window.buildMats = function (THREE) {
     mats.foliageOlive = new THREE.MeshStandardMaterial({color: 0x6e7b57, roughness: 1.0, metalness: 0, flatShading: true});
     mats.foliageCypress = new THREE.MeshStandardMaterial({color: 0x38492f, roughness: 1.0, metalness: 0, flatShading: true});
     mats.trunk = new THREE.MeshStandardMaterial({color: 0x584634, roughness: 1.0, metalness: 0});
+    addRealismMats(mats);
     return mats;
   }
   var marbleTex = noiseTex(256, 0.08, '#e8e0cf');
@@ -71,5 +85,6 @@ window.buildMats = function (THREE) {
   mats.foliageOlive = new THREE.MeshStandardMaterial({color: 0x6e7b57, roughness: 1.0, metalness: 0, flatShading: true});
   mats.foliageCypress = new THREE.MeshStandardMaterial({color: 0x38492f, roughness: 1.0, metalness: 0, flatShading: true});
   mats.trunk = new THREE.MeshStandardMaterial({color: 0x584634, roughness: 1.0, metalness: 0});
+  addRealismMats(mats);
   return mats;
 };

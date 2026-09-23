@@ -9,39 +9,9 @@ window.buildScenery = function (THREE, mats, H) {
     return s / 4294967296;
   }
 
-  // Athena Promachos at (-62, 0, -12)
-  var promachos = new THREE.Group();
+  // Athena Promachos at (-62, 0, -12), built by 13-figures.js
+  var promachos = H.makePromachos({});
   promachos.position.set(-62, 0, -12);
-
-  var plinth = new THREE.Mesh(
-    new THREE.BoxGeometry(3, 2.5, 3),
-    mats.marble
-  );
-  plinth.position.y = 1.25;
-  plinth.castShadow = true;
-  plinth.receiveShadow = true;
-  promachos.add(plinth);
-
-  var fig = H.makeFigure(9.0);
-  fig.position.y = 2.5;
-  fig.traverse(function (o) {
-    if (o.isMesh) {
-      o.material = mats.bronze;
-      o.castShadow = true;
-      o.receiveShadow = true;
-    }
-  });
-  promachos.add(fig);
-
-  var spear = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.08, 0.08, 11, 6),
-    mats.bronze
-  );
-  spear.position.set(-62 + 1.2, 2.5 + 5.5, -12);
-  spear.castShadow = true;
-  spear.receiveShadow = true;
-  group.add(spear);
-
   group.add(promachos);
 
   // Great Altar at (-8, 0, -41)
