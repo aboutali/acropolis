@@ -87,11 +87,54 @@ window.buildErechtheion = function (THREE, mats, H) {
     group.add(caryatidRear);
   }
 
-  // Caryatid entablature slab
-  var caryatidEntabSlab = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.9, 3.5), mats.marble);
-  caryatidEntabSlab.position.set(6, 1.8 + 2.3 + 0.45, 7.35);
-  caryatidEntabSlab.castShadow = true; caryatidEntabSlab.receiveShadow = true;
-  group.add(caryatidEntabSlab);
+  // Caryatid porch entablature: a three-fascia Ionic architrave, a dentil
+  // course, and a projecting cornice — not a plain slab. Cheap (a handful of
+  // boxes plus one small instanced dentil row), but reads as a real order
+  // resting on the maidens' heads instead of a block of stone.
+  (function () {
+    var capW = 5.4, capD = 3.5, capY = 1.8 + 2.3 + 0.05;
+    // Dentils enlarged and spaced coarser (0.12x0.14 @ ~0.2 spacing -> 0.2x0.22
+    // @ ~0.32 spacing, close to the art director's own suggested numbers):
+    // the old row read as an indistinct speckle at normal viewing distance.
+    // A dark recessed soffit backing sits directly behind the row (new) so
+    // each tooth reads as a raised block against a shadowed background
+    // instead of floating cubes with nothing behind them, and the teeth now
+    // project past the fascia's own edge for a real cast-shadow line.
+    var archH = 0.42, dentilH = 0.22, corniceH = 0.33;
+    var fasciaH = archH / 3;
+    for (var fb = 0; fb < 3; fb++) {
+      var fw = capW - fb * 0.05, fd = capD - fb * 0.05;
+      var fascia = new THREE.Mesh(new THREE.BoxGeometry(fw, fasciaH * 0.94, fd), mats.marble);
+      fascia.position.set(6, capY + fasciaH * (fb + 0.5), 7.35);
+      fascia.castShadow = true; fascia.receiveShadow = true;
+      group.add(fascia);
+    }
+    var dentilY = capY + archH + dentilH / 2;
+    var dentilSpacing = 0.32;
+    var dCount = Math.max(3, Math.round(capW / dentilSpacing));
+    dentilSpacing = capW / dCount;
+    var dentilW = dentilSpacing * 0.62;
+    var dentilDepth = 0.3;
+    var soffitGeo = new THREE.BoxGeometry(capW - 0.08, dentilH * 0.92, 0.14);
+    var soffitT = [
+      { p: [6, dentilY, 7.35 + capD / 2 - 0.16] },
+      { p: [6, dentilY, 7.35 - capD / 2 + 0.16] }
+    ];
+    group.add(H.instance(soffitGeo, mats.marbleShadowed, soffitT));
+    var dentilGeo = new THREE.BoxGeometry(dentilW, dentilH, dentilDepth);
+    var dentilT = [];
+    for (var di = 0; di < dCount; di++) {
+      var dx = 6 - capW / 2 + (di + 0.5) * dentilSpacing;
+      dentilT.push({ p: [dx, dentilY, 7.35 + capD / 2 - 0.05 + dentilDepth * 0.15] });
+      dentilT.push({ p: [dx, dentilY, 7.35 - capD / 2 + 0.05 - dentilDepth * 0.15] });
+    }
+    group.add(H.instance(dentilGeo, mats.marble, dentilT));
+    var corniceOvh = 0.18;
+    var cornice = new THREE.Mesh(new THREE.BoxGeometry(capW + 2 * corniceOvh, corniceH, capD + 2 * corniceOvh), mats.marbleWorn);
+    cornice.position.set(6, capY + archH + dentilH + corniceH / 2, 7.35);
+    cornice.castShadow = true; cornice.receiveShadow = true;
+    group.add(cornice);
+  })();
 
   // West wall: 4 engaged half-columns at x = -10.6, z evenly spaced from -4 to 4
   var westPositions = [[-10.6, -4], [-10.6, -1.33333], [-10.6, 1.33333], [-10.6, 4]];

@@ -98,7 +98,7 @@ window.buildPropylaea = function (THREE, mats, H) {
     var x = -8 + (-4 + i * 4);
     northColPos.push([x, -16 + 5.5]);
   }
-  var northCols = H.makeDoricColumns(northColPos, { height: 5.4, baseD: 1.0, topD: 0.8 });
+  var northCols = H.makeDoricColumns(northColPos, { height: 5.4, baseD: 1.0, topD: 0.8, simple: true });
   group.add(northCols);
 
   var northRoofGeo = new THREE.BoxGeometry(12.6, 0.5, 10.6);
@@ -121,7 +121,7 @@ window.buildPropylaea = function (THREE, mats, H) {
     var x = -8 + (-3 + i * 3);
     southColPos.push([x, 17 - 4.5]);
   }
-  var southCols = H.makeDoricColumns(southColPos, { height: 5.4, baseD: 1.0, topD: 0.8 });
+  var southCols = H.makeDoricColumns(southColPos, { height: 5.4, baseD: 1.0, topD: 0.8, simple: true });
   group.add(southCols);
 
   var southRoofGeo = new THREE.BoxGeometry(9.6, 0.5, 8.6);

@@ -45,8 +45,11 @@ window.buildParthenon = function (THREE, mats, H) {
   var metopeSeedBase = 3000;
   var entablature = H.makeEntablature(30.9, 69.5, 3.3, {
     triglyphs: true, triglyphCount: 13, zCount: 31,
+    // One figure per metope plate (not two): with 92 bays this halves the
+    // relief triangle cost while still reading as carved sculpture rather
+    // than a blank slab from normal viewing distance.
     metopeMaker: H.makeRelief ? function (idx, mw, mh) {
-      return H.makeRelief(mw, mh, { lowDetail: true, seed: metopeSeedBase + idx });
+      return H.makeRelief(mw, mh, { lowDetail: true, seed: metopeSeedBase + idx, figures: 1 });
     } : null
   });
   entablature.position.y = 10.43;
@@ -77,7 +80,9 @@ window.buildParthenon = function (THREE, mats, H) {
     var x = -9 + (18 / 5) * i;
     pronaosCols.push([x, 26]);
   }
-  var pronaoGroup = H.makeDoricColumns(pronaosCols, { height: 8.0, baseD: 1.5, topD: 1.2 });
+  // Set back behind the peristyle (not a facade the camera gets close to);
+  // the cheap unfluted variant keeps these in budget without a visible loss.
+  var pronaoGroup = H.makeDoricColumns(pronaosCols, { height: 8.0, baseD: 1.5, topD: 1.2, simple: true });
   group.add(pronaoGroup);
 
   // Opisthodomos: 6 Doric columns at z = -26, x evenly in [-9, 9]
@@ -86,10 +91,13 @@ window.buildParthenon = function (THREE, mats, H) {
     var x = -9 + (18 / 5) * i;
     opisthodomosCols.push([x, -26]);
   }
-  var opisthodoGroup = H.makeDoricColumns(opisthodomosCols, { height: 8.0, baseD: 1.5, topD: 1.2 });
+  var opisthodoGroup = H.makeDoricColumns(opisthodomosCols, { height: 8.0, baseD: 1.5, topD: 1.2, simple: true });
   group.add(opisthodoGroup);
 
   // Interior colonnade: two rows of 10 Doric columns at x = ±7.5, z evenly from -20 to +18
+  // Deep inside the cella, behind the peristyle and (mostly) the doorway —
+  // nobody gets close enough to read fluting here, so this uses the cheap
+  // unfluted "simple" column variant (drops flutes/annulet/joint bands).
   var interiorCols = [];
   for (var i = 0; i < 10; i++) {
     var z = -20 + (38 / 9) * i;
@@ -101,7 +109,7 @@ window.buildParthenon = function (THREE, mats, H) {
     var x = -6 + (12 / 4) * i;
     interiorCols.push([x, -23]);
   }
-  var interiorGroup = H.makeDoricColumns(interiorCols, { height: 5.0, baseD: 0.9, topD: 0.75, flutes: 16 });
+  var interiorGroup = H.makeDoricColumns(interiorCols, { height: 5.0, baseD: 0.9, topD: 0.75, simple: true });
   group.add(interiorGroup);
 
   // Panathenaic frieze: continuous relief strips around the exterior of the
@@ -116,21 +124,21 @@ window.buildParthenon = function (THREE, mats, H) {
       { len: 59 + 2.4, x: 21.7 / 2 + 0.7, z: 0, ry: Math.PI / 2 },
       { len: 59 + 2.4, x: -(21.7 / 2 + 0.7), z: 0, ry: -Math.PI / 2 }
     ];
-    // Whatever detail the relief plate itself carries (13-figures.js owns
-    // H.makeRelief), the procession also gets a cheap instanced line of
-    // small marching/riding figure blocks along every strip so the frieze
-    // silhouette breaks up into individual figures instead of a blank band.
-    var friezeFigGeo = new THREE.BoxGeometry(0.22, friezeH * 0.62, 0.09);
-    var friezeHeadGeo = new THREE.SphereGeometry(friezeH * 0.09, 6, 5);
-    var friezeFigT = [], friezeHeadT = [];
+    // The relief plate itself (13-figures.js owns H.makeRelief) already
+    // bakes its own carved figures into the merged mesh — an extra layer of
+    // free-floating instanced marching figures on top of every strip was
+    // duplicate geometry for a band that is, per the comment above, mostly
+    // hidden behind the peristyle anyway. One low-detail figure per strip
+    // (via `figures: 1` below) keeps the frieze reading as carved sculpture
+    // wherever a gap in the colonnade lets it show, at a fraction of the
+    // triangle cost.
     for (var fs = 0; fs < friezeSpecs.length; fs++) {
       var spec = friezeSpecs[fs];
       var stripCount = Math.max(1, Math.round(spec.len / 8));
       var stripLen = spec.len / stripCount;
       var horiz = spec.ry === 0 || spec.ry === Math.PI;
-      var figSpacing = 0.62, figCount = Math.max(1, Math.round(spec.len / figSpacing));
       for (var si = 0; si < stripCount; si++) {
-        var strip = H.makeRelief(stripLen * 0.98, friezeH, { lowDetail: true, seed: friezeSeed + fs * 20 + si });
+        var strip = H.makeRelief(stripLen * 0.98, friezeH, { lowDetail: true, seed: friezeSeed + fs * 20 + si, figures: 1 });
         var along = -spec.len / 2 + (si + 0.5) * stripLen;
         var ax = horiz ? along : 0;
         var az = horiz ? 0 : along;
@@ -138,17 +146,7 @@ window.buildParthenon = function (THREE, mats, H) {
         strip.rotation.y = spec.ry;
         group.add(strip);
       }
-      for (var fi = 0; fi < figCount; fi++) {
-        var falong = -spec.len / 2 + (fi + 0.5) * figSpacing;
-        var fx = spec.x + (horiz ? falong : 0), fz = spec.z + (horiz ? 0 : falong);
-        var outSign = spec.ry === 0 ? 1 : spec.ry === Math.PI ? -1 : spec.ry === Math.PI / 2 ? 1 : -1;
-        var ox = horiz ? 0 : outSign * 0.05, oz = horiz ? outSign * 0.05 : 0;
-        friezeFigT.push({ p: [fx + ox, friezeY, fz + oz], r: [0, spec.ry, 0] });
-        friezeHeadT.push({ p: [fx + ox, friezeY + friezeH * 0.36, fz + oz], r: [0, spec.ry, 0] });
-      }
     }
-    group.add(H.instance(friezeFigGeo, mats.marbleRelief, friezeFigT));
-    group.add(H.instance(friezeHeadGeo, mats.marbleRelief, friezeHeadT));
   } else {
     // Fallback if the figures module hasn't loaded: plain coursed band.
     var frieze = H.makeBlockCourse(22.5, 59.8, 1.0, 1.2);
