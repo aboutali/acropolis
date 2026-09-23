@@ -230,7 +230,7 @@ window.buildMats = function (THREE) {
         var veinCol = [196, 188, 172];
         var patinaCol = [214, 190, 150];   // soft honey/ochre wash (art-director spec)
         var c = lerpC(base, veinCol, vn * 0.35);
-        c = lerpC(c, patinaCol, pn * 0.28);
+        c = lerpC(c, patinaCol, pn * 0.42);
         var gshade = (grain - 0.5) * 26 - crackAmt * 6;
         var di = i * 4;
         color[di] = byte(c[0] + gshade); color[di + 1] = byte(c[1] + gshade * 0.92); color[di + 2] = byte(c[2] + gshade * 0.8); color[di + 3] = 255;
@@ -381,7 +381,10 @@ window.buildMats = function (THREE) {
   // =================================================================
   (function () {
     var res = GEN, color = new Uint8ClampedArray(res * res * 4), height = new Float32Array(res * res), rough = new Uint8ClampedArray(res * res * 4);
-    var soil = [178, 168, 150], soilDark = [155, 146, 128], pebbleLt = [196, 188, 170], pebbleDk = [130, 122, 106], fleck = [172, 162, 142];
+    // Cooled ~half the warm (R-B) bias out of the palette (art-director note: plateau reads
+    // warm cream-yellow under strong key light rather than cool grey-beige) so the base tone
+    // holds up under a warm late-afternoon key without relying on lighting changes.
+    var soil = [172, 168, 158], soilDark = [150, 146, 134], pebbleLt = [190, 188, 176], pebbleDk = [126, 122, 112], fleck = [168, 164, 150];
     var x, y;
     for (y = 0; y < res; y++) {
       var v = (y + 0.5) / res;
@@ -466,7 +469,7 @@ window.buildMats = function (THREE) {
     var color = new Uint8ClampedArray(res * res * 4), rm = new Uint8ClampedArray(res * res * 4);
     var patinaC = new Uint8ClampedArray(res * res * 4), patinaRM = new Uint8ClampedArray(res * res * 4);
     var flakeHeight = new Float32Array(res * res); // dedicated crackle/flake field for bronzePatina's normal map
-    var dark = [58, 45, 32], warm = [104, 84, 56], verdigris = [90, 120, 105], verdigrisDk = [64, 88, 80];
+    var dark = [68, 55, 42], warm = [114, 94, 66], verdigris = [90, 120, 105], verdigrisDk = [64, 88, 80];
     var x, y;
     for (y = 0; y < res; y++) {
       var v = (y + 0.5) / res;
