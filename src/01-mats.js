@@ -222,8 +222,12 @@ window.buildMats = function (THREE) {
         // meander instead of forming a rigid grid, isolated to sparse thin ridge peaks only.
         var crackWarpU = u + (fbmTile(u, v, seed + 811, 6, 6, 3, 0.5) - 0.5) * 0.18;
         var crackWarpV = v + (fbmTile(u, v, seed + 812, 6, 6, 3, 0.5) - 0.5) * 0.18;
-        var crackN = ridgeTile(crackWarpU, crackWarpV, seed + 950, 27, 27, 7);
-        var crackAmt = smooth(0.8, 0.965, crackN);
+        var crackN = ridgeTile(crackWarpU, crackWarpV, seed + 950, 27, 27, 8);
+        // Per-pixel threshold jitter (art-director r2 note) so the ridge-noise crack network
+        // doesn't read as a perfectly regular repeat: +-0.03 shifts the onset threshold,
+        // giving ~10-20% amplitude variation across the field.
+        var crackJit = (fbmTile(u, v, seed + 960, 5, 5, 3, 0.5) - 0.5) * 0.06;
+        var crackAmt = smooth(0.8 + crackJit, 0.965, crackN);
         height[i] = clamp01(0.5 + (grain - 0.5) * 0.5 - vn * 0.12 - crackAmt * 0.17);
         vein[i] = vn; patina[i] = pn; streak[i] = clamp01(sk);
         var base = [233, 222, 200];        // creamy white Pentelic base (art-director spec)
@@ -381,10 +385,13 @@ window.buildMats = function (THREE) {
   // =================================================================
   (function () {
     var res = GEN, color = new Uint8ClampedArray(res * res * 4), height = new Float32Array(res * res), rough = new Uint8ClampedArray(res * res * 4);
-    // Cooled ~half the warm (R-B) bias out of the palette (art-director note: plateau reads
-    // warm cream-yellow under strong key light rather than cool grey-beige) so the base tone
-    // holds up under a warm late-afternoon key without relying on lighting changes.
-    var soil = [172, 168, 158], soilDark = [150, 146, 134], pebbleLt = [190, 188, 176], pebbleDk = [126, 122, 112], fleck = [168, 164, 150];
+    // r2: art director still reads the plateau as warm cream-yellow even after the r1 cooling
+    // pass, because the scene's key light (0xffbb66 at intensity 5.0 in 10-env.js, an env-owned
+    // file) dominates the lit faces and re-warms whatever base tone the texture has. Since we
+    // can't touch the light from here, push the base palette further: nearly neutral R~=G~=B
+    // (killing almost all of the remaining warm R-B bias) plus a small G/B lift so the residual
+    // cast trends grey-blue rather than grey-beige-warm once the key light multiplies it.
+    var soil = [151, 153, 150], soilDark = [124, 127, 123], pebbleLt = [171, 173, 168], pebbleDk = [101, 103, 100], fleck = [144, 146, 141];
     var x, y;
     for (y = 0; y < res; y++) {
       var v = (y + 0.5) / res;
@@ -451,8 +458,10 @@ window.buildMats = function (THREE) {
       var n = clamp01(warp1 * 0.6 + warp2 * 0.4);
       var fire = fbmTile(u, v, 4501, 4, 5, 4, 0.5);                      // asymmetric freq avoids single-axis bias
       var patchN = smooth(0.35, 0.75, warpTile(u, v, 4551, 6, 7, 4, 0.5, 0.5)); // firing/weathering patches
-      var base = [160, 95, 70], hot = [178, 118, 92], cool = [128, 82, 64], patchCol = [150, 96, 74];
-      var c = lerpC(cool, hot, fire);
+      // r2: mute further toward weathered brown-red -- lower the hot extreme's saturation and
+      // weight the cool/muted end more heavily in the fire blend.
+      var base = [160, 95, 70], hot = [163, 105, 80], cool = [132, 80, 62], patchCol = [150, 96, 74];
+      var c = lerpC(cool, hot, fire * 0.6);
       c = lerpC(c, base, 0.35);
       c = lerpC(c, patchCol, patchN * 0.4);
       var g = (n - 0.5) * 28;
@@ -469,7 +478,14 @@ window.buildMats = function (THREE) {
     var color = new Uint8ClampedArray(res * res * 4), rm = new Uint8ClampedArray(res * res * 4);
     var patinaC = new Uint8ClampedArray(res * res * 4), patinaRM = new Uint8ClampedArray(res * res * 4);
     var flakeHeight = new Float32Array(res * res); // dedicated crackle/flake field for bronzePatina's normal map
-    var dark = [68, 55, 42], warm = [114, 94, 66], verdigris = [90, 120, 105], verdigrisDk = [64, 88, 80];
+    // r2 art-director pass: statue still read near-black with invisible verdigris. Brighten the
+    // dark/warm bronze base further and pull the verdigris hue apart from the bronze base (a bit
+    // more saturated + cooler dark variant) so crust patches read as distinct blue-green streaks
+    // rather than merging into shadow -- but kept short of the director's most saturated ask,
+    // since a first pass at that value plus the metallic crackle normal produced a neon/glowing
+    // highlight under the strong direct light; this is a middle point that stays legible without
+    // glowing (see normalScale/metalness note below for the other half of that fix).
+    var dark = [78, 65, 50], warm = [130, 110, 80], verdigris = [78, 148, 112], verdigrisDk = [54, 92, 82];
     var x, y;
     for (y = 0; y < res; y++) {
       var v = (y + 0.5) / res;
@@ -483,23 +499,29 @@ window.buildMats = function (THREE) {
         var rough = clamp01(0.32 + (1 - streak) * 0.2 + (fleck - 0.5) * 0.1);
         rm[di] = 255; rm[di + 1] = byte(rough * 255); rm[di + 2] = byte(0.92 * 255); rm[di + 3] = 255;
 
-        var patch = smooth(0.62, 0.9, warpTile(u, v, 5701, 3, 3, 4, 0.5, 0.5));
+        // Lowered threshold a bit (was 0.62-0.9 in r1) so more of the field crosses into visible
+        // verdigris crust -- r1 coverage read as near-invisible -- but not as low as a first r2
+        // attempt (0.45-0.75), which covered so much area that, combined with the metallic sheen
+        // still left on the crust, it read as a solid neon-green wash instead of streaks/patches.
+        var patch = smooth(0.55, 0.85, warpTile(u, v, 5701, 3, 3, 4, 0.5, 0.5));
         var patchDetail = fbmTile(u, v, 5801, 12, 12, 3, 0.5);
         var pc = lerpC(c, patch > 0.5 ? verdigris : verdigrisDk, patch * 0.8);
         var pg = (patchDetail - 0.5) * 14;
         patinaC[di] = byte(pc[0] + pg); patinaC[di + 1] = byte(pc[1] + pg); patinaC[di + 2] = byte(pc[2] + pg * 0.8); patinaC[di + 3] = 255;
-        var prough = clamp01(rough + patch * 0.4);
-        var pmetal = clamp01(0.85 - patch * 0.4);
+        // Crust is pushed further toward matte/non-metal (was -0.4, now -0.6) so it stops
+        // throwing a bright specular highlight in the crust color under the strong direct sun --
+        // that specular bounce, not just the albedo, was the main source of the neon look.
+        var prough = clamp01(rough + patch * 0.5);
+        var pmetal = clamp01(0.85 - patch * 0.6);
         patinaRM[di] = 255; patinaRM[di + 1] = byte(prough * 255); patinaRM[di + 2] = byte(pmetal * 255); patinaRM[di + 3] = 255;
 
         // Fine crystalline crackle/flake detail (fbm of ridges), independent of roughness,
-        // heavier where the verdigris crust patch sits.
-        // Crackle/flake amplitude doubled (vs. the r1 pass) before the Sobel filter below, so
-        // the corroded verdigris crust reads as physically crumbling/flaking, not just a
-        // roughness-shaped surface.
+        // heavier where the verdigris crust patch sits. Amplitude raised modestly vs. r1 (was
+        // 1.2/0.8) so the crust reads as physically flaking, but pulled back from a first r2
+        // attempt (1.5/1.0) that over-sharpened the normal map into glinting specular noise.
         var crackle = ridgeTile(u, v, 5901, 18, 18, 4);
         var crackle2 = ridgeTile(u, v, 5950, 9, 9, 3);
-        flakeHeight[i] = clamp01(0.5 + (crackle - 0.5) * 1.2 + (crackle2 - 0.5) * 0.8 * (0.4 + patch * 0.6));
+        flakeHeight[i] = clamp01(0.5 + (crackle - 0.5) * 1.3 + (crackle2 - 0.5) * 0.9 * (0.4 + patch * 0.6));
       }
     }
     var bronzeCanvas = arrToCanvas(color, res);
@@ -515,8 +537,10 @@ window.buildMats = function (THREE) {
       color: 0xffffff, roughness: 1, metalness: 1,
       map: toTexture(upscale(patinaCanvas, SIZE), true),
       roughnessMap: patinaRMTex, metalnessMap: patinaRMTex,
+      // normalScale eased back from 0.95 (r1) -- at full strength the sharpened r2 crackle
+      // field threw hard glinting specular noise across the crust under the strong direct sun.
       normalMap: toTexture(upscale(heightToNormalCanvas(flakeHeight, res, 2.4), SIZE), false),
-      normalScale: new THREE.Vector2(0.95, 0.95)
+      normalScale: new THREE.Vector2(0.7, 0.7)
     });
   })();
 
@@ -555,7 +579,11 @@ window.buildMats = function (THREE) {
         // Coarse aging blotches: a large, low-octave fbm field so weathering reads as big
         // uneven patches of the wall, not a uniform speckle.
         var blotchN = fbmTile(u, v, 8850, 3, 3, 3, 0.5);
-        var blotchMask = smooth(0.42, 0.78, blotchN);
+        // r2: raise the threshold (was 0.42-0.78) to shrink blotch coverage, and fragment the
+        // remaining patches with a higher-frequency secondary field so aging reads as varied
+        // small weathering rather than a few monolithic stains.
+        var blotchDetail = fbmTile(u, v, 8870, 6, 6, 3, 0.5);
+        var blotchMask = smooth(0.5, 0.75, blotchN) * (0.7 + 0.3 * blotchDetail);
         var c = lerpC(base, patch, n * 0.4);
         c = lerpC(c, blotchCol, blotchMask * 0.28);
         plasterC[di] = byte(c[0]); plasterC[di + 1] = byte(c[1]); plasterC[di + 2] = byte(c[2]); plasterC[di + 3] = 255;
@@ -627,7 +655,7 @@ window.buildMats = function (THREE) {
   // ---------------------------------------------------------------
   var UV_SCALE = {
     marble: 1.3, marbleWorn: 1.3, marbleShadowed: 1.4, marbleStatue: 0.9, marbleRelief: 1.3,
-    rock: 10, rockDark: 8, ground: 2.5, city: 4, terracotta: 1.4,
+    rock: 10, rockDark: 8, ground: 4, city: 4, terracotta: 1.4,
     bronze: 2, bronzePatina: 2, foliageOlive: 3, foliageCypress: 3, trunk: 1.1,
     gold: 1, ivory: 1.4, grass: 6, scrub: 4, plaster: 3,
   };
