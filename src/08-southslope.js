@@ -342,7 +342,10 @@ window.buildSouthSlope = function (THREE, mats, H) {
     var hit = ray.intersectObject(apron);
     if (!hit.length || hit[0].point.y < -75) continue;
     var gy = hit[0].point.y, sc = 0.8 + rnd() * 0.5;
-    canopyT.push({ p: [cx3, gy + 1.2 + 4.5 * sc, cz3], s: [sc, sc, sc] });
+    // Asymmetric xz scale (0.8-1.3x independently per axis) so each cone canopy reads as a
+    // slightly irregular, wind-shaped crown instead of a perfect cone of revolution.
+    var ccx = 0.8 + rnd() * 0.5, ccz = 0.8 + rnd() * 0.5;
+    canopyT.push({ p: [cx3, gy + 1.2 + 4.5 * sc, cz3], s: [sc * ccx, sc, sc * ccz] });
     trunkT.push({ p: [cx3, gy + 0.75, cz3] });
   }
   group.add(H.instance(new THREE.ConeGeometry(1.3, 9, 8), mats.foliageCypress, canopyT));

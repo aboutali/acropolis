@@ -124,17 +124,21 @@ window.buildScenery = function (THREE, mats, H) {
       var offsetZ = tree.z + Math.sin(offsetAngle) * offsetDist;
       var offsetY = 3.0 + (rnd() - 0.5) * 2 * 1.0;
       var scale = 0.5 + rnd() * 0.4;
+      // Independent per-axis scale (0.8-1.3x each) so every lobe is a lopsided, irregular clump
+      // rather than a scaled-uniform icosahedron -- breaks the "perfect blob" geometric look.
+      var lcx = 0.8 + rnd() * 0.5, lcz = 0.8 + rnd() * 0.5;
       oliveCanopyTransforms.push({
         p: [offsetX, offsetY, offsetZ],
         r: [rnd() * PI, rnd() * PI, rnd() * PI],
-        s: [scale, scale * (0.75 + rnd() * 0.3), scale]
+        s: [scale * lcx, scale * (0.75 + rnd() * 0.3), scale * lcz]
       });
     }
     // A central anchor lobe so the crown still reads as one tree, not just a ring of blobs.
+    var acx = 0.85 + rnd() * 0.4, acz = 0.85 + rnd() * 0.4;
     oliveCanopyTransforms.push({
       p: [tree.x, 3.0 + (rnd() - 0.5), tree.z],
       r: [rnd() * PI, rnd() * PI, rnd() * PI],
-      s: [0.85, 0.65, 0.85]
+      s: [0.85 * acx, 0.65, 0.85 * acz]
     });
   }
   group.add(H.instance(new THREE.IcosahedronGeometry(1.7, 0), mats.foliageOlive, oliveCanopyTransforms));
