@@ -97,26 +97,35 @@ window.makeHelpers = function (THREE, mats) {
     return group;
   };
 
-  // Ionic columns
+  // Ionic columns. opts.rotY turns the capitals so the volutes face along that axis.
   H.makeIonicColumns = function (positions, opts) {
     opts = opts || {};
     var height = opts.height !== undefined ? opts.height : 6.5;
     var baseD = opts.baseD !== undefined ? opts.baseD : 0.85;
-    var topD = opts.topD !== undefined ? opts.topD : 0.72;
+    var topD = opts.topD !== undefined ? opts.topD : baseD * 0.84;
     var flutes = opts.flutes !== undefined ? opts.flutes : 24;
     var y = opts.y !== undefined ? opts.y : 0;
+    var rotY = opts.rotY !== undefined ? opts.rotY : 0;
     var group = new THREE.Group();
+    var baseH = 0.3;
     var shaftH = height * 0.86;
+    var capH = height - baseH - shaftH;
+    var baseR = baseD * 0.62;
 
-    var baseGeo = new THREE.CylinderGeometry(baseD * 0.62, baseD * 0.68, 0.3, 24);
-    var shaftGeo = new THREE.CylinderGeometry(topD / 2, baseD * 0.62, shaftH, Math.min(40, flutes * 2), SEG.colHeight);
+    // Attic base: plinth drum with two tori
+    var baseGeo = new THREE.CylinderGeometry(baseR, baseR * 1.1, baseH, 24);
+    var torusLoGeo = new THREE.TorusGeometry(baseR * 1.02, baseH * 0.2, 4, 20);
+    torusLoGeo.rotateX(PI / 2);
+    var torusHiGeo = new THREE.TorusGeometry(baseR * 0.92, baseH * 0.15, 4, 20);
+    torusHiGeo.rotateX(PI / 2);
+
+    var shaftGeo = new THREE.CylinderGeometry(topD / 2, baseR, shaftH, Math.min(40, flutes * 2), SEG.colHeight);
     var pos = shaftGeo.getAttribute('position');
     var posArray = pos.array;
     for (var i = 0; i < posArray.length; i += 3) {
-      var px = posArray[i], py = posArray[i + 1], pz = posArray[i + 2];
+      var px = posArray[i], pz = posArray[i + 2];
       var theta = atan2(pz, px);
       var r = sqrt(px * px + pz * pz);
-      var yN = (py + shaftH / 2) / shaftH;
       var newR = r * (1 - 0.025 * (0.5 + 0.5 * cos(flutes * theta)));
       posArray[i] = newR * cos(theta);
       posArray[i + 2] = newR * sin(theta);
@@ -124,23 +133,77 @@ window.makeHelpers = function (THREE, mats) {
     pos.needsUpdate = true;
     shaftGeo.computeVertexNormals();
 
-    var voluteGeo = new THREE.TorusGeometry(topD * 0.22, topD * 0.09, 6, 12);
-    var abacusGeo = new THREE.BoxGeometry(topD * 1.5, 0.22, topD * 1.1);
+    // Capital, built around the shaft top (local y = 0) and later rotated by rotY
+    var echH = capH * 0.32, canH = capH * 0.4, abH = capH * 0.22;
+    var capW = topD * 1.9, capDp = topD * 1.02;
+    var volR = Math.min(topD * 0.34, capH * 0.62);
+    var volX = capW / 2 - volR * 0.7;
+    var volY = echH + canH * 0.5 - volR * 0.35;
 
-    var baseTransforms = [], shaftTransforms = [], voluteTransforms = [], abacusTransforms = [];
+    var echinusGeo = new THREE.CylinderGeometry(topD * 0.58, topD * 0.5, echH, 20);
+    echinusGeo.translate(0, echH / 2, 0);
+    var canalisGeo = new THREE.BoxGeometry(capW - volR * 1.2, canH, capDp);
+    canalisGeo.translate(0, echH + canH / 2, 0);
+    var abacusGeo = new THREE.BoxGeometry(capW * 0.96, abH, capDp * 1.05);
+    abacusGeo.translate(0, capH - abH / 2, 0);
+    // Pulvinus: the bolster that joins front and back volutes
+    var pulvGeo = new THREE.CylinderGeometry(volR * 0.92, volR * 0.92, capDp * 0.96, 16);
+    pulvGeo.rotateX(PI / 2);
+
+    var CFG_MOBILE = window.CFG && window.CFG.MOBILE;
+    // Spiral tube on the volute face; hand = +1 for the right volute, -1 mirrors it
+    function spiralGeo(hand) {
+      var pts = [], n = CFG_MOBILE ? 18 : 30, turns = 2.4;
+      for (var k = 0; k <= n; k++) {
+        var t = k / n;
+        var ang = PI / 2 - t * turns * 2 * PI;
+        var rr = volR * (1 - 0.82 * t);
+        pts.push(new THREE.Vector3(hand * rr * cos(ang), rr * sin(ang), 0));
+      }
+      var g = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), n, volR * 0.1, 4, false);
+      var eye = new THREE.SphereGeometry(volR * 0.16, 6, 4);
+      return [g, eye];
+    }
+    var spR = spiralGeo(1), spL = spiralGeo(-1);
+
+    var baseT = [], torLoT = [], torHiT = [], shaftT = [], capT = [], pulvT = [], spRT = [], spLT = [];
+    var cq = cos(rotY), sq = sin(rotY);
+    function capPoint(cx, cz, lx, ly, lz) {
+      return [cx + lx * cq + lz * sq, ly, cz - lx * sq + lz * cq];
+    }
+    var zF = capDp * 0.49;
     for (var i = 0; i < positions.length; i++) {
-      var px = positions[i][0], pz = positions[i][1];
-      baseTransforms.push({ p: [px, y + 0.15, pz] });
-      shaftTransforms.push({ p: [px, y + 0.3 + shaftH / 2, pz] });
-      voluteTransforms.push({ p: [px + topD * 0.55, y + 0.3 + shaftH, pz], r: [PI / 2, 0, 0] });
-      voluteTransforms.push({ p: [px - topD * 0.55, y + 0.3 + shaftH, pz], r: [PI / 2, 0, 0] });
-      abacusTransforms.push({ p: [px, y + 0.3 + shaftH + 0.22 / 2 + 0.11, pz] });
+      var cx = positions[i][0], cz = positions[i][1];
+      var y0 = y + baseH + shaftH;
+      baseT.push({ p: [cx, y + baseH / 2, cz] });
+      torLoT.push({ p: [cx, y + baseH * 0.2, cz] });
+      torHiT.push({ p: [cx, y + baseH * 0.85, cz] });
+      shaftT.push({ p: [cx, y + baseH + shaftH / 2, cz] });
+      capT.push({ p: [cx, y0, cz], r: [0, rotY, 0] });
+      var pr = capPoint(cx, cz, volX, 0, 0), pl = capPoint(cx, cz, -volX, 0, 0);
+      pulvT.push({ p: [pr[0], y0 + volY, pr[2]], r: [0, rotY, 0] });
+      pulvT.push({ p: [pl[0], y0 + volY, pl[2]], r: [0, rotY, 0] });
+      // Front faces: right spiral at +x, mirrored at -x. Back faces: the same pair turned by PI.
+      var fr = capPoint(cx, cz, volX, 0, zF), fl = capPoint(cx, cz, -volX, 0, zF);
+      var br = capPoint(cx, cz, volX, 0, -zF), bl = capPoint(cx, cz, -volX, 0, -zF);
+      spRT.push({ p: [fr[0], y0 + volY, fr[2]], r: [0, rotY, 0] });
+      spRT.push({ p: [bl[0], y0 + volY, bl[2]], r: [0, rotY + PI, 0] });
+      spLT.push({ p: [fl[0], y0 + volY, fl[2]], r: [0, rotY, 0] });
+      spLT.push({ p: [br[0], y0 + volY, br[2]], r: [0, rotY + PI, 0] });
     }
 
-    group.add(H.instance(baseGeo, mats.marbleWorn, baseTransforms));
-    group.add(H.instance(shaftGeo, mats.marbleWorn, shaftTransforms));
-    group.add(H.instance(voluteGeo, mats.marbleWorn, voluteTransforms));
-    group.add(H.instance(abacusGeo, mats.marbleWorn, abacusTransforms));
+    group.add(H.instance(baseGeo, mats.marbleWorn, baseT));
+    group.add(H.instance(shaftGeo, mats.marble, shaftT));
+    group.add(H.instance(echinusGeo, mats.marbleWorn, capT));
+    group.add(H.instance(canalisGeo, mats.marble, capT));
+    group.add(H.instance(abacusGeo, mats.marbleWorn, capT));
+    group.add(H.instance(pulvGeo, mats.marble, pulvT));
+    // Small carved detail: receives shadows but casts none, to keep the shadow pass cheap
+    [[spR[0], spRT], [spR[1], spRT], [spL[0], spLT], [spL[1], spLT], [torusLoGeo, torLoT], [torusHiGeo, torHiT]].forEach(function (e) {
+      var m = H.instance(e[0], mats.marbleWorn, e[1]);
+      m.castShadow = false;
+      group.add(m);
+    });
     return group;
   };
 
@@ -305,13 +368,32 @@ window.makeHelpers = function (THREE, mats) {
       group.add(mesh);
     }
 
-    // Figures
+    // Figures: standing in the centre, kneeling further out, reclining in the corners
+    var spacing = figures > 1 ? (w * 0.8) / (figures - 1) : w;
     for (var i = 0; i < figures; i++) {
-      var xi = i / (figures - 1);
-      var fx = -w * 0.42 + xi * w * 0.84;
-      var fh = Math.max(0.6, 0.85 * h * (1 - Math.abs(fx) / (w / 2)));
-      var fig = H.makeFigure(fh);
-      fig.position.set(fx, fh / 2, d / 2 + 0.2);
+      var xi = figures > 1 ? i / (figures - 1) : 0.5;
+      var fx = -w * 0.4 + xi * w * 0.8;
+      var avail = h * (1 - Math.abs(fx) / (w / 2)) - 0.3;
+      var side = fx > 0 ? 1 : -1;
+      var fig;
+      if (avail >= 1.5) {
+        var fh = Math.min(avail * 0.92, h * 0.85);
+        fig = H.makeFigure(fh);
+        fig.position.set(fx, 0.02, d / 2 + 0.2);
+        fig.rotation.set(0, side * 0.25 * (i % 2 ? 1 : 0.4), side * -0.04);
+      } else if (avail >= 0.7) {
+        var kh = (avail * 0.92) / 0.72;
+        fig = H.makeFigure(kh);
+        fig.scale.set(1, 0.72, 1);
+        fig.position.set(fx, 0.02, d / 2 + 0.2);
+        fig.rotation.set(0, -side * 0.35, 0);
+      } else {
+        // Lying with the head toward the centre
+        var len = Math.max(0.6, Math.min(avail / 0.3, spacing * 1.5));
+        fig = H.makeFigure(len);
+        fig.rotation.set(0, 0, side * PI / 2 * 0.94);
+        fig.position.set(fx + side * len * 0.35, 0.13 * len + 0.02, d / 2 + 0.2);
+      }
       group.add(fig);
     }
 
@@ -344,23 +426,23 @@ window.makeHelpers = function (THREE, mats) {
       group.add(mesh);
     }
 
-    // Tiles
+    // Tiles: rows run from eave to ridge; tiles grow on big roofs to keep each side under ~700
     if (tiles) {
-      var tileGeo = new THREE.BoxGeometry(0.6, 0.06, 0.7);
+      var k = Math.max(1, sqrt((slopeLen / 0.75) * (d / 0.65) / 700));
+      var rowStep = 0.75 * k, colStep = 0.65 * k;
+      var tileGeo = new THREE.BoxGeometry(0.6 * k, 0.06, 0.7 * k);
       var tileTransforms = [];
-      var tileCount = 0;
-      var maxTiles = 1200;
+      var rowCount = Math.floor(slopeLen / rowStep);
+      var colCount = Math.floor(d / colStep);
       for (var si = 0; si < 2; si++) {
         var sx = si === 0 ? 1 : -1;
-        var rowCount = Math.floor(slopeLen / 0.75);
-        var colCount = Math.floor(d / 0.65);
-        for (var r = 0; r < rowCount && tileCount < maxTiles; r++) {
-          for (var c = 0; c < colCount && tileCount < maxTiles; c++) {
-            var tx = sx * (w / 4 - (r + 0.5) * 0.75 * cos(angle));
-            var ty = ridgeH / 2 + (r + 0.5) * 0.75 * sin(angle) + 0.14 * cos(angle);
-            var tz = -(d / 2) + (c + 0.5) * 0.65;
+        for (var r = 0; r < rowCount; r++) {
+          var sAlong = -slopeLen / 2 + (r + 0.5) * rowStep;
+          for (var c = 0; c < colCount; c++) {
+            var tx = sx * (w / 4 - sAlong * cos(angle));
+            var ty = ridgeH / 2 + sAlong * sin(angle) + 0.14 * cos(angle);
+            var tz = -(d / 2) + (c + 0.5) * colStep;
             tileTransforms.push({ p: [tx, ty, tz], r: [0, 0, si === 0 ? -angle : angle] });
-            tileCount++;
           }
         }
       }
@@ -530,82 +612,42 @@ window.makeHelpers = function (THREE, mats) {
     var doorWidth = o.doorWidth !== undefined ? o.doorWidth : 4;
     var doorSide = o.doorSide !== undefined ? o.doorSide : '+z';
     var group = new THREE.Group();
-    var thickness = 1.2;
+    var t = o.thickness !== undefined ? o.thickness : 1.2;
+    var doorH = h * 0.65;
 
-    var sideX = new THREE.BoxGeometry(w, h, thickness);
-    var sideZ = new THREE.BoxGeometry(thickness, h, d);
-
-    var eastMesh = new THREE.Mesh(sideX, mats.marbleWorn);
-    eastMesh.position.set(w / 2 + thickness / 2, h / 2, 0);
-    eastMesh.castShadow = true;
-    eastMesh.receiveShadow = true;
-    group.add(eastMesh);
-
-    var westMesh = new THREE.Mesh(sideX, mats.marbleWorn);
-    westMesh.position.set(-w / 2 - thickness / 2, h / 2, 0);
-    westMesh.castShadow = true;
-    westMesh.receiveShadow = true;
-    group.add(westMesh);
-
-    var northMesh = new THREE.Mesh(sideZ, mats.marbleWorn);
-    northMesh.position.set(0, h / 2, -d / 2 - thickness / 2);
-    northMesh.castShadow = true;
-    northMesh.receiveShadow = true;
-    group.add(northMesh);
-
-    var southMesh = new THREE.Mesh(sideZ, mats.marbleWorn);
-    southMesh.position.set(0, h / 2, d / 2 + thickness / 2);
-    southMesh.castShadow = true;
-    southMesh.receiveShadow = true;
-    group.add(southMesh);
-
-    if (doorSide === '+z' || doorSide === '-z') {
-      var dz = doorSide === '+z' ? d / 2 + thickness / 2 : -d / 2 - thickness / 2;
-      var halfFlank = (w - doorWidth) / 2;
-      var flank1 = new THREE.BoxGeometry(halfFlank, h, thickness);
-      var flank1Mesh = new THREE.Mesh(flank1, mats.marbleWorn);
-      flank1Mesh.position.set(-halfFlank / 2, h / 2, dz);
-      flank1Mesh.castShadow = true;
-      flank1Mesh.receiveShadow = true;
-      group.add(flank1Mesh);
-
-      var flank2 = new THREE.BoxGeometry(halfFlank, h, thickness);
-      var flank2Mesh = new THREE.Mesh(flank2, mats.marbleWorn);
-      flank2Mesh.position.set(halfFlank / 2, h / 2, dz);
-      flank2Mesh.castShadow = true;
-      flank2Mesh.receiveShadow = true;
-      group.add(flank2Mesh);
-
-      var lintel = new THREE.BoxGeometry(doorWidth, h * 0.3, thickness);
-      var lintelMesh = new THREE.Mesh(lintel, mats.marbleWorn);
-      lintelMesh.position.set(0, h * 0.7, dz);
-      lintelMesh.castShadow = true;
-      lintelMesh.receiveShadow = true;
-      group.add(lintelMesh);
-    } else if (doorSide === '+x' || doorSide === '-x') {
-      var dx = doorSide === '+x' ? w / 2 + thickness / 2 : -w / 2 - thickness / 2;
-      var halfFlank = (d - doorWidth) / 2;
-      var flank1 = new THREE.BoxGeometry(thickness, h, halfFlank);
-      var flank1Mesh = new THREE.Mesh(flank1, mats.marbleWorn);
-      flank1Mesh.position.set(dx, h / 2, -halfFlank / 2);
-      flank1Mesh.castShadow = true;
-      flank1Mesh.receiveShadow = true;
-      group.add(flank1Mesh);
-
-      var flank2 = new THREE.BoxGeometry(thickness, h, halfFlank);
-      var flank2Mesh = new THREE.Mesh(flank2, mats.marbleWorn);
-      flank2Mesh.position.set(dx, h / 2, halfFlank / 2);
-      flank2Mesh.castShadow = true;
-      flank2Mesh.receiveShadow = true;
-      group.add(flank2Mesh);
-
-      var lintel = new THREE.BoxGeometry(thickness, h * 0.3, doorWidth);
-      var lintelMesh = new THREE.Mesh(lintel, mats.marbleWorn);
-      lintelMesh.position.set(dx, h * 0.7, 0);
-      lintelMesh.castShadow = true;
-      lintelMesh.receiveShadow = true;
-      group.add(lintelMesh);
+    function box(sx, sy, sz, x, y, z) {
+      var m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mats.marbleWorn);
+      m.position.set(x, y, z);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      group.add(m);
     }
+
+    // Wall along x at z = zc, or along z at x = xc; len is its full length
+    function wall(axis, off, len, withDoor) {
+      if (!withDoor) {
+        if (axis === 'x') box(len, h, t, 0, h / 2, off); else box(t, h, len, off, h / 2, 0);
+        return;
+      }
+      var flank = (len - doorWidth) / 2;
+      var fc = doorWidth / 2 + flank / 2;
+      var lintelH = h - doorH;
+      if (axis === 'x') {
+        box(flank, h, t, -fc, h / 2, off);
+        box(flank, h, t, fc, h / 2, off);
+        box(doorWidth, lintelH, t, 0, doorH + lintelH / 2, off);
+      } else {
+        box(t, h, flank, off, h / 2, -fc);
+        box(t, h, flank, off, h / 2, fc);
+        box(t, lintelH, doorWidth, off, doorH + lintelH / 2, 0);
+      }
+    }
+
+    // Walls along x close the short ends; walls along z run the full outer length
+    wall('x', d / 2 + t / 2, w, doorSide === '+z');
+    wall('x', -d / 2 - t / 2, w, doorSide === '-z');
+    wall('z', w / 2 + t / 2, d + 2 * t, doorSide === '+x');
+    wall('z', -w / 2 - t / 2, d + 2 * t, doorSide === '-x');
 
     return group;
   };

@@ -1,6 +1,8 @@
 // Module 04 - Parthenon
 window.buildParthenon = function (THREE, mats, H) {
   var group = new THREE.Group();
+  // Raise the building so its three steps stand above the plateau
+  group.position.y = 1.65;
 
   // Stylobate
   var stylobate = H.makeSteppedBase(30.9, 69.5, 3, 0.55, 0.7);

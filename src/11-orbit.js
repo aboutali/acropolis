@@ -2,7 +2,7 @@
 window.makeOrbit = function (THREE, camera, el, opts) {
   opts = opts || {};
   var target = opts.target !== undefined ? opts.target : new THREE.Vector3(0, 0, 0);
-  var minDist = opts.minDist !== undefined ? opts.minDist : 25;
+  var minDist = opts.minDist !== undefined ? opts.minDist : 12;
   var maxDist = opts.maxDist !== undefined ? opts.maxDist : 900;
   var minPolar = opts.minPolar !== undefined ? opts.minPolar : 0.08;
   var maxPolar = opts.maxPolar !== undefined ? opts.maxPolar : 1.50;
@@ -20,6 +20,7 @@ window.makeOrbit = function (THREE, camera, el, opts) {
   var theta_t = theta;
   var phi_t = phi;
   var radius_t = radius;
+  var target_t = target.clone();
   var lastInteract = performance.now();
   var pointers = new Map();
 
@@ -42,10 +43,32 @@ window.makeOrbit = function (THREE, camera, el, opts) {
     phi_t = Math.max(minPolar, Math.min(maxPolar, phi_t));
     radius_t = Math.max(minDist, Math.min(maxDist, radius_t));
 
+    target.lerp(target_t, damping);
     theta += (theta_t - theta) * damping;
     phi += (phi_t - phi) * damping;
     radius += (radius_t - radius) * damping;
 
+    updateCamera();
+  }
+
+  // Glide to a preset: v = { t: [x, y, z], r: radius, theta: azimuth, phi: polar }
+  function flyTo(v) {
+    target_t.set(v.t[0], v.t[1], v.t[2]);
+    var d = v.theta - theta_t;
+    d -= Math.round(d / (2 * Math.PI)) * 2 * Math.PI;
+    theta_t += d;
+    phi_t = v.phi;
+    radius_t = v.r;
+    lastInteract = performance.now();
+  }
+
+  // Jump to a preset without the glide
+  function jumpTo(v) {
+    flyTo(v);
+    target.copy(target_t);
+    theta = theta_t;
+    phi = phi_t;
+    radius = radius_t;
     updateCamera();
   }
 
@@ -118,6 +141,8 @@ window.makeOrbit = function (THREE, camera, el, opts) {
   return {
     update: update,
     setAutoRotate: setAutoRotate,
+    flyTo: flyTo,
+    jumpTo: jumpTo,
     target: target
   };
 };
