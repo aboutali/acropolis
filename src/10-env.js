@@ -12,6 +12,35 @@ window.buildEnv = function (THREE, scene, renderer) {
     return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
   }
 
+  // Deterministic value-noise + fBm (no built-in random, no imports): a fixed-hash lattice noise
+  // combined across 4 octaves at 0.5 persistence gives the multi-scale, fractal-like ridgeline
+  // variation real mountain profiles have (broad shoulders + medium bumps + fine jaggedness),
+  // instead of the old per-column independent-random ("cardboard cutout") look.
+  function latticeHash(i, seed) {
+    var x = Math.sin(i * 12.9898 + seed * 78.233 + 1.0) * 43758.5453;
+    return x - Math.floor(x);
+  }
+  function valueNoise1D(x, seed) {
+    var i0 = Math.floor(x), f = x - i0;
+    var a = latticeHash(i0, seed), b = latticeHash(i0 + 1, seed);
+    var u = f * f * (3.0 - 2.0 * f);
+    return a + (b - a) * u;
+  }
+  function fbm1D(x, seed, octaves, persistence) {
+    var total = 0, amp = 1, freq = 1, maxAmp = 0;
+    for (var o = 0; o < octaves; o++) {
+      total += valueNoise1D(x * freq, seed + o * 101.0) * amp;
+      maxAmp += amp;
+      amp *= persistence;
+      freq *= 2.0;
+    }
+    return maxAmp > 0 ? total / maxAmp : 0;
+  }
+  function smoothstepJs(e0, e1, x) {
+    var t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
+  }
+
   // Late-afternoon sun: elevation ~30 deg, bearing WSW (247.5 deg from north, +x East / +z South)
   // so the sun sits fairly high and a touch south-of-west, lighting the south and west facades
   // without the low, reddened light of true sunset.
@@ -59,13 +88,19 @@ window.buildEnv = function (THREE, scene, renderer) {
       ' vec2 dirXZ = normalize(dir.xz + vec2(1e-5));' +
       ' vec2 sunXZ = normalize(sunDir.xz + vec2(1e-5));' +
       ' float azDot = dot(dirXZ, sunXZ);' +
-      ' float warmMix = smoothstep(0.2, 1.0, azDot);' +
+      // Wider, more gradual horizon-to-zenith blend (was 0.2..1.0) so the pale-warm and
+      // deep-blue tones melt into each other instead of showing a visible transition band.
+      ' float warmMix = smoothstep(0.1, 0.6, azDot);' +
       ' vec3 horizonTone = mix(horizon, horizonWarm, warmMix);' +
       ' vec3 col = mix(zenith, horizonTone, clamp(horizonMix, 0.0, 1.0));' +
       ' float cosGamma = clamp(dot(dir, sunDir), -1.0, 1.0);' +
+      // Broad luminous zone around the sun (~50 degree cone) — real bright afternoon sun
+      // washes out a wide swath of sky, not just a tight corona.
+      ' float sunHalo = pow(max(cosGamma, 0.0), 6.0);' +
       ' float mieOuter = pow(max(cosGamma, 0.0), 70.0);' +
       ' float mieInner = pow(max(cosGamma, 0.0), 1600.0);' +
       ' float corona = pow(max(cosGamma, 0.0), 3000.0);' +
+      ' col += sunColor * sunHalo * 0.16;' +
       ' col += sunColor * mieOuter * 0.08;' +
       ' col += sunColor * mieInner * 0.30;' +
       ' col += sunColor * corona * 1.2;' +
@@ -101,11 +136,12 @@ window.buildEnv = function (THREE, scene, renderer) {
     var eAzLen = Math.sqrt(epx * epx + epz * epz) || 1;
     var eSunAzLen = Math.sqrt(sunDirX * sunDirX + sunDirZ * sunDirZ) || 1;
     var eAzDot = (epx / eAzLen) * (sunDirX / eSunAzLen) + (epz / eAzLen) * (sunDirZ / eSunAzLen);
-    var eWarmMix = Math.min(1, Math.max(0, (eAzDot - 0.2) / 0.8));
+    var eWarmMix = smoothstepJs(0.1, 0.6, eAzDot);
     tmpHz.copy(horizonColor).lerp(horizonWarmColor, eWarmMix);
     tmpCol.copy(zenithColor).lerp(tmpHz, eHorizonMix);
     var eCosGamma = eux * sunDirX + euy * sunDirY + euz * sunDirZ;
-    var eGlow = Math.pow(Math.max(eCosGamma, 0), 20) * 0.30;
+    var eHalo = Math.pow(Math.max(eCosGamma, 0), 6) * 0.16;
+    var eGlow = Math.pow(Math.max(eCosGamma, 0), 20) * 0.30 + eHalo;
     tmpCol.r += sunSkyColor.r * eGlow; tmpCol.g += sunSkyColor.g * eGlow; tmpCol.b += sunSkyColor.b * eGlow;
     if (euy < 0) tmpCol.lerp(groundDusk, Math.min(1, Math.max(0, -euy / 0.3)));
     // Dim the baked copy well below the dome's on-screen brightness: this feeds ambient/
@@ -134,7 +170,9 @@ window.buildEnv = function (THREE, scene, renderer) {
 
   // Sun: a soft warm-white gold rather than a saturated orange, so marble reads warm without
   // tipping into an orange cast (that belongs to sunset, not a 30-degree afternoon sun).
-  var sun = new THREE.DirectionalLight(0xffe7c0, 4.6);
+  // Intensity bumped ~1.2x (was 4.6) so the bright afternoon sun reads more strongly on the
+  // marble and against the sky's luminous zone near the solar direction.
+  var sun = new THREE.DirectionalLight(0xffe7c0, 5.5);
   var sunDist = 300;
   sun.position.set(cx + sunDirX * sunDist, sunDirY * sunDist, cz + sunDirZ * sunDist);
   sun.castShadow = true;
@@ -157,9 +195,9 @@ window.buildEnv = function (THREE, scene, renderer) {
   // tuned so the flat ground plain (and everything else) visibly fades to blue-grey haze by
   // roughly a kilometre out, instead of staying crisp (and warm-tinted) all the way to a bright
   // band at the horizon.
-  var fogColor = horizonColor.clone().lerp(new THREE.Color(0xffffff), 0.08);
-  var fogDensity = MOBILE ? 0.0007 : 0.00085;
-  scene.fog = new THREE.FogExp2(fogColor.getHex ? fogColor.getHex() : 0xc9d6e4, fogDensity);
+  var fogColor = horizonWarmColor.clone();
+  var fogDensity = MOBILE ? 0.00068 : 0.00082;
+  scene.fog = new THREE.FogExp2(fogColor.getHex ? fogColor.getHex() : 0xfdf2dc, fogDensity);
 
   // Distant hill ranges: real heightfield strips (a handful of rows deep, a few dozen columns
   // wide) rather than a single flat ribbon, so slopes are rounded, ridgelines are noisy, and a
@@ -170,14 +208,25 @@ window.buildEnv = function (THREE, scene, renderer) {
   // they ever reached the screen) and a single, distance-scaled manual haze blend is baked into
   // the colour once instead — gentle enough that the ranges stay a readable silhouette, as they
   // do in reference photos of Hymettus/Parnitha seen from the Acropolis.
-  var hazeTint = fogColor;
+  // Distant-atmosphere tint: real Mediterranean haze on far ranges leans grey-purple rather
+  // than neutral blue-grey, and near ranges keep a subtle warm-grey undertone from the low
+  // afternoon sun raking across them. Kept separate from the ground/sky fog colour (which
+  // stays matched to the pale horizon tone) so the two are tuned independently.
+  // Used undiluted (not lerped toward the pale fog colour): the sun's high intensity plus ACES
+  // tonemapping already compresses a lot of saturation out of distant geometry, so the source
+  // tint needs real saturation of its own for a grey-purple/warm-grey undertone to actually
+  // survive onto screen (see the emissive veil below, which is what mainly carries this hue).
+  var hazeCool = new THREE.Color(0x6f5490);
+  var hazeWarm = new THREE.Color(0xc08a52);
   function buildHillGeometry(b0, b1, radius, baseY, hMin, hMax, seed, cols, rows) {
     var rnd = makeLcg(seed);
     var peak = [];
     for (var c = 0; c <= cols; c++) {
-      // Two blended random terms give a noisy ridgeline with occasional low saddles and
-      // taller sub-peaks, rather than uniform bumps.
-      peak.push(0.35 + 0.65 * (0.5 * rnd() + 0.5 * rnd()));
+      // 4-octave fBm (0.5 persistence) over a fixed-hash lattice gives a fractal-like
+      // ridgeline: broad shoulders from the low octave, medium bumps and fine jaggedness
+      // layered on top, instead of independent per-column randomness.
+      var fbmVal = fbm1D((c / cols) * 6.0, seed, 4, 0.5);
+      peak.push(0.35 + 0.65 * fbmVal);
     }
     var pos = [];
     var norml = [];
@@ -217,15 +266,30 @@ window.buildEnv = function (THREE, scene, renderer) {
 
   var hillCols = MOBILE ? 16 : 28;
   var hillRows = MOBILE ? 4 : 7;
+  // Haze-blend steps now progress gradually across layers (0.28 / 0.33 / 0.40, was a jump to
+  // 0.50) so there's no visible atmospheric-density step between ranges, and each layer mixes
+  // its own warm/cool haze balance ("warm": 1 = warm-grey undertone from raking sun, 0 = cooler
+  // grey-purple distant-atmosphere tone) — nearer ranges lean warm, the farthest leans purple.
   var ranges = [
-    { b0: 55, b1: 128, r: 4200, base: -58, hMin: 170, hMax: 310, seed: 71, color: 0x5b6d72, haze: 0.30 },   // Hymettus, east
-    { b0: -38, b1: 42, r: 5200, base: -68, hMin: 230, hMax: 400, seed: 133, color: 0x556570, haze: 0.50 }, // Parnitha, north (farthest -> palest)
-    { b0: 232, b1: 306, r: 3900, base: -52, hMin: 150, hMax: 280, seed: 205, color: 0x60717a, haze: 0.26 }  // Aigaleo, west (nearest -> least faded)
+    { b0: 55, b1: 128, r: 4200, base: -58, hMin: 170, hMax: 310, seed: 71, color: 0x5b6d72, haze: 0.33, warm: 0.45 },   // Hymettus, east (mid distance)
+    { b0: -38, b1: 42, r: 5200, base: -68, hMin: 230, hMax: 400, seed: 133, color: 0x556570, haze: 0.40, warm: 0.15 }, // Parnitha, north (farthest -> palest, most purple)
+    { b0: 232, b1: 306, r: 3900, base: -52, hMin: 150, hMax: 280, seed: 205, color: 0x60717a, haze: 0.28, warm: 0.70 }  // Aigaleo, west (nearest -> least faded, warmest)
   ];
   for (var ri = 0; ri < ranges.length; ri++) {
     var rg = ranges[ri];
-    var hillCol = new THREE.Color(rg.color).lerp(hazeTint, rg.haze);
-    var hillMat = new THREE.MeshLambertMaterial({ color: hillCol, fog: false, side: THREE.DoubleSide });
+    var hazeMix = hazeCool.clone().lerp(hazeWarm, rg.warm);
+    // Albedo is kept dark: the sun here is very intense (needed elsewhere for the marble to
+    // read correctly), and at full strength a brighter albedo pushes the sunlit ridge crests
+    // straight into ACES' near-white highlight rolloff, which quietly erases any hue baked into
+    // the diffuse colour. A dark base keeps the lit shading (needed for real terrain modelling)
+    // present but modest, while the haze tint is carried mainly by the emissive veil below —
+    // physically closer anyway, since distant-haze colour is mostly atmosphere-scattered light
+    // sitting on top of a heavily attenuated surface, not the surface's own local reflectance.
+    var hillCol = new THREE.Color(rg.color).multiplyScalar(0.45).lerp(hazeMix, rg.haze * 0.35);
+    var hillMat = new THREE.MeshLambertMaterial({
+      color: hillCol, emissive: hazeMix, emissiveIntensity: 1.0 + rg.haze,
+      fog: false, side: THREE.DoubleSide
+    });
     var hillGeo = buildHillGeometry(rg.b0, rg.b1, rg.r, rg.base, rg.hMin, rg.hMax, rg.seed, hillCols, hillRows);
     var hillMesh = new THREE.Mesh(hillGeo, hillMat);
     hillMesh.frustumCulled = false;
