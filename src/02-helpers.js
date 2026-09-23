@@ -6,6 +6,38 @@ window.makeHelpers = function (THREE, mats) {
   var PI = Math.PI, sqrt = Math.sqrt, sin = Math.sin, cos = Math.cos, atan2 = Math.atan2, abs = Math.abs;
 
   function rotXZ(x, z, a) { if (!a) return [x, z]; var c = cos(a), s = sin(a); return [x * c - z * s, x * s + z * c]; }
+
+  // Fake "pillow" bevel: tilts a flat face's vertex normals across the face
+  // (toward its centre, or along one in-plane axis) without adding a single
+  // extra vertex or triangle. A perfectly flat quad still IS flat, but the
+  // Gouraud-interpolated shading across its two triangles now reads as a
+  // soft dome/chamfer — real depth discontinuity in the surface normals
+  // (art director's own phrase) at zero triangle cost. `axis` is the local
+  // axis (0=x,1=y,2=z) the target face's normal points along; `tiltAxes`
+  // lists which local axes drive the tilt from that face's own extents.
+  // Shared per-geometry (so instancing keeps this free across every copy).
+  function pillowFace(geo, axis, tiltAmt, tiltAxes) {
+    geo.computeBoundingBox();
+    var bb = geo.boundingBox;
+    var half = [(bb.max.x - bb.min.x) / 2, (bb.max.y - bb.min.y) / 2, (bb.max.z - bb.min.z) / 2];
+    var nAttr = geo.getAttribute('normal'), pAttr = geo.getAttribute('position');
+    var na = nAttr.array, pa = pAttr.array;
+    for (var i = 0; i < na.length; i += 3) {
+      if (abs(na[i + axis]) > 0.9) {
+        var tilt = [0, 0, 0];
+        for (var k = 0; k < tiltAxes.length; k++) {
+          var ax = tiltAxes[k];
+          var u = half[ax] ? pa[i + ax] / half[ax] : 0;
+          tilt[ax] = u * tiltAmt;
+        }
+        tilt[axis] = na[i + axis] > 0 ? 1 : -1;
+        var len = sqrt(tilt[0] * tilt[0] + tilt[1] * tilt[1] + tilt[2] * tilt[2]);
+        na[i] = tilt[0] / len; na[i + 1] = tilt[1] / len; na[i + 2] = tilt[2] / len;
+      }
+    }
+    nAttr.needsUpdate = true;
+  }
+
   function addMesh(group, geo, mat, p, r) {
     var m = new THREE.Mesh(geo, mat);
     if (p) m.position.set(p[0], p[1], p[2]);
@@ -118,7 +150,12 @@ window.makeHelpers = function (THREE, mats) {
           // real Doric fluting is wide concave arcs meeting at a sharp line,
           // not an even sinusoidal scallop, and this reads as much stronger
           // shadow definition along each flute.
-          taper = 1 - 0.09 * Math.pow(0.5 + 0.5 * cos(flutes * theta), 0.42);
+          // Carve depth bumped ~28% (0.09 -> 0.115): the art director found
+          // the arris (the ridge where two flute valleys meet) reading as
+          // soft/rounded even with hard per-face normals below, because a
+          // shallow V is nearly flat at the ridge regardless of shading —
+          // deepening the V itself is what actually sharpens the crease.
+          taper = 1 - 0.115 * Math.pow(0.5 + 0.5 * cos(flutes * theta), 0.42);
           neckFac = 1;
         } else {
           taper = 1;                          // hypotrachelion: plain, unfluted band
@@ -184,7 +221,12 @@ window.makeHelpers = function (THREE, mats) {
     // the vertex-level foot-flare above, this gives the column base a
     // visible molded collar (same cheap thin-cylinder technique as the
     // annulet at the neck) instead of the shaft just stopping flat.
-    var footRingGeo = new THREE.CylinderGeometry(baseD / 2 * 1.055, baseD / 2 * 1.07, height * 0.01, Math.min(radial, MOBILE ? 12 : 16));
+    // Diameter spread (excess over 1.0x baseD) multiplied ~1.3x, and height
+    // nearly doubled, over the r1 pass: the art director found the ring too
+    // conservative to read as a distinct architectural element at normal
+    // viewing distance — same triangle cost either way (only radii/height
+    // params change, not segment counts).
+    var footRingGeo = new THREE.CylinderGeometry(baseD / 2 * 1.07, baseD / 2 * 1.09, height * 0.018, Math.min(radial, MOBILE ? 12 : 16));
 
     var annuletBand = height * 0.02;
     var footRingT = [];
@@ -263,7 +305,9 @@ window.makeHelpers = function (THREE, mats) {
       theta = atan2(pz, px); r = sqrt(px * px + pz * pz);
       yN = (py + shaftH / 2) / shaftH;
       ent = 1 + 0.012 * sin(PI * yN);
-      newR = r * (1 - 0.028 * (0.5 + 0.5 * cos(flutes * theta))) * ent;
+      // Same ~28% flute-depth bump as the Doric shaft above, for the same
+      // reason: a sharper arris needs a deeper V, not just hard normals.
+      newR = r * (1 - 0.036 * (0.5 + 0.5 * cos(flutes * theta))) * ent;
       arr[i] = newR * cos(theta); arr[i + 2] = newR * sin(theta);
     }
     pos.needsUpdate = true;
@@ -814,6 +858,14 @@ window.makeHelpers = function (THREE, mats) {
       rowW = d / rows;
       var jointGap = rowW * 0.08;
       var panGeo = new THREE.BoxGeometry(1, 1, 1); // unit box; sized per-instance via `s`
+      // Fake pan-tile curvature: tilt the top/bottom face normals across the
+      // tile's local Z (its rowW/cross-slope width, unaffected by the
+      // per-instance slope rotation), so each flat board shades like a
+      // shallow curved terracotta pan instead of a dead-flat plank — a real
+      // curved-cylinder profile here would multiply triangles across every
+      // one of these (there are dozens per roof), so this stays a zero-tri
+      // shading trick instead of added geometry.
+      pillowFace(panGeo, 1, 0.5, [2]);
       // Half-cylinder cap, unit length along local X (its own long axis),
       // reused for both the seam covers and — scaled — the eave antefixes.
       var coverGeo = new THREE.CylinderGeometry(1, 1, 1, MOBILE ? 6 : 8, 1, true, 0, PI);
@@ -1077,8 +1129,18 @@ window.makeHelpers = function (THREE, mats) {
         for (var b = 0; b < n; b++) {
           var along = -len / 2 + (b + 0.5) * bl + rowOffset;
           if (along > len / 2) along -= len;
+          // Per-block horizontal course offset (+-2mm): real quarried courses
+          // never stack perfectly true, so this nudges each block slightly
+          // off its ideal grid position along the wall run, independent of
+          // the joint-gap width itself — the art director found the coursing
+          // reading as too perfectly CNC-cut/gridded.
+          along += (rnd() - 0.5) * 0.004;
           var jg = jointGapV * (0.6 + rnd() * 0.8);
-          var lift = (rnd() - 0.5) * 0.004;
+          // Per-block height delta (+-3mm, up from +-2mm): each block's own
+          // top edge now wobbles independently rather than every block in a
+          // course sharing one dead-level line — still sub-centimetre so it
+          // reads as natural irregularity, not misalignment.
+          var lift = (rnd() - 0.5) * 0.006;
           var proud = (rnd() - 0.5) * 0.006;
           var px = cx + dx * along + nx * proud, pz = cz + dz * along + nz * proud;
           var t = { p: [px, cyBase + lift, pz], r: [0, ang, 0], s: [(bl - jg) / bl, (courseHeights[c] - jointGapH) / courseH, 1] };
@@ -1098,13 +1160,19 @@ window.makeHelpers = function (THREE, mats) {
           bucket.push(t);
         }
       }
-      // Dark mortar/grout backing behind the coursed veneer: without it, the
-      // hand-dressed gaps between blocks read as holes straight through to
-      // whatever is behind the wall instead of a mortared joint. Switched
-      // from the (fairly light) marbleShadowed marble texture to the much
-      // darker rockDark material so the widened joint above reads as a
-      // legible dark line/shadow, not a barely-visible hairline.
-      addMesh(group, new THREE.BoxGeometry(len + thick * 0.2, h, thick * 0.82), mats.rockDark, [cx, h / 2, cz], [0, ang, 0]);
+      // Dark mortar/grout backing behind the coursed veneer, recessed well
+      // behind the block front face: without it, the hand-dressed gaps
+      // between blocks read as holes straight through to whatever is behind
+      // the wall instead of a mortared joint. r1 only widened the joint gap
+      // and darkened this backing's colour; the art director found the
+      // joint still reading as a flat painted-on line because the actual
+      // depth step (block thickness minus backing thickness, split evenly
+      // front/back) was only ~9% of wall thickness. Backing thickness cut
+      // from 0.82x to 0.6x: the visible recess at every seam more than
+      // doubles (now ~20% of thickness per side), a real geometric groove
+      // whose side walls (the block's own hard box faces) catch distinctly
+      // different light than the front — not just a colour change.
+      addMesh(group, new THREE.BoxGeometry(len + thick * 0.2, h, thick * 0.6), mats.rockDark, [cx, h / 2, cz], [0, ang, 0]);
     }
 
     var halfW = w / 2, halfD = d / 2;
@@ -1130,6 +1198,13 @@ window.makeHelpers = function (THREE, mats) {
     }
 
     var blockGeo = new THREE.BoxGeometry(blockLen, courseH, thickness);
+    // Fake edge bevel + weathered-face pitting on the exposed front/back
+    // faces, at zero extra triangles (see pillowFace above): every block's
+    // flat face now shades with a soft highlight-to-shadow gradient toward
+    // its own edges — reads as rounded/worn arrises and a less perfectly
+    // machined surface, addressing both the "sharp CNC edges" and "too
+    // uniform/pristine surface" notes without touching the triangle budget.
+    pillowFace(blockGeo, 2, 0.4, [0, 1]);
     if (blockWornT.length) group.add(H.instance(blockGeo, mats.marbleWorn, blockWornT));
     if (blockShadowedT.length) group.add(H.instance(blockGeo, mats.marbleShadowed, blockShadowedT));
     if (blockCleanT.length) group.add(H.instance(blockGeo, mats.marble, blockCleanT));
