@@ -4,6 +4,65 @@ window.addFigureHelpers = function (THREE, mats, H) {
   var MOBILE = !!(window.CFG && window.CFG.MOBILE);
   var UP = new THREE.Vector3(0, 1, 0);
 
+  // ---- local material refinements, used only by this module's own meshes ----
+  // mats.marbleStatue and mats.bronzePatina are consumed nowhere else in the
+  // scene (every other module uses marble/marbleWorn/marbleShadowed/bronze), so
+  // cloning them here and tuning the clones only affects figures — the shared
+  // objects in `mats` (and anything else that might reference them later) are
+  // left completely untouched.
+  var matMarbleFig = mats.marbleStatue;
+  var matBronzeFig = mats.bronzePatina;
+  if (matMarbleFig && matMarbleFig.clone) {
+    matMarbleFig = matMarbleFig.clone();
+    // Waxy, slightly warmer marble: real Pentelic marble carries a soft specular
+    // sheen and lets warm light bleed through thin edges (ears, fingers, drapery
+    // hems) rather than reading as a hard, opaque, uniformly matte plaster.
+    if (typeof matMarbleFig.roughness === 'number') matMarbleFig.roughness = Math.min(matMarbleFig.roughness, 0.86);
+    matMarbleFig.onBeforeCompile = function (shader) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        [
+          '  // fake subsurface scattering: a view-dependent (fresnel) warm rim so thin,',
+          '  // backlit edges pick up an orange/amber glow the way real marble does when',
+          '  // sunlight passes through a few centimetres of stone.',
+          '  vec3 figViewDir = normalize( vViewPosition );',
+          '  float figRim = pow( 1.0 - max( dot( normalize( normal ), figViewDir ), 0.0 ), 2.4 );',
+          '  gl_FragColor.rgb += figRim * vec3( 0.55, 0.30, 0.13 ) * 0.30;',
+          '#include <dithering_fragment>'
+        ].join('\n')
+      );
+    };
+  }
+  if (matBronzeFig && matBronzeFig.clone) {
+    matBronzeFig = matBronzeFig.clone();
+    // Director's r1 review: the previous weights (0.38 desaturate + 0.30 toward
+    // a single hue) crushed the statue into a uniform dark silhouette — the
+    // drapery folds, aegis and body form were still there in the geometry but
+    // the material was hiding them. Cut both mix weights roughly in half and
+    // brighten the result ~25% so the underlying shading (which does carry the
+    // shape) reads through, while still smoothing the verdigris texture's
+    // patches from small-fitting-scale noise into something coherent at 9m.
+    if (typeof matBronzeFig.roughness === 'number') matBronzeFig.roughness = Math.min(matBronzeFig.roughness, 0.62);
+    matBronzeFig.onBeforeCompile = function (shader) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment>',
+        [
+          '#include <map_fragment>',
+          '  // The verdigris crust texture was tuned for small bronze fittings; at the',
+          '  // Promachos\'s 9m scale its patches read as bright, saturated, disconnected',
+          '  // splotches rather than a coherent weathered coloration. A lighter touch',
+          '  // here (vs. the original full desaturate+hue-lock) blends the patches',
+          '  // toward a coherent verdigris while leaving enough colour/value variation',
+          '  // for the sculpted drapery, aegis and helmet to still read as shapes.',
+          '  float figLuma = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );',
+          '  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( figLuma ), 0.18 );',
+          '  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.32, 0.42, 0.36 ), 0.15 );',
+          '  diffuseColor.rgb *= 1.25;'
+        ].join('\n')
+      );
+    };
+  }
+
   // ---- seeded LCG (no built-in RNG allowed) ----
   function makeRng(seed) {
     var s = (seed >>> 0) || 1;
@@ -62,7 +121,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
   function foldedLathe(profile, opts) {
     opts = opts || {};
     var radial = opts.radial || (MOBILE ? 11 : 20);
-    var mat = opts.material || mats.marbleStatue;
+    var mat = opts.material || matMarbleFig;
     var vFold = opts.vFold !== undefined ? opts.vFold : 0.05;
     var vFoldCount = opts.vFoldCount || 9;
     var vFoldBiasTheta = opts.vFoldBiasTheta;
@@ -81,6 +140,11 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var rnd = makeRng(seed);
     var phase = rnd() * PI * 2;
     var microPhase = rnd() * PI * 2;
+    // organic-irregularity phases: deterministic per seed, used to break the fold
+    // pattern's otherwise-perfect angular/vertical regularity (real drapery folds
+    // vary in depth, width and crispness across a figure rather than repeating
+    // identically) without introducing any runtime randomness.
+    var irregPhaseA = rnd() * PI * 2, irregPhaseB = rnd() * PI * 2, irregPhaseC = rnd() * PI * 2;
 
     var geo = new THREE.LatheGeometry(profile, radial);
     var pos = geo.getAttribute('position');
@@ -91,8 +155,18 @@ window.addFigureHelpers = function (THREE, mats, H) {
       var r = sqrt(x * x + z * z);
       var yFrac = y / span;
       var bias = vFoldBiasTheta !== undefined ? (1 + vFoldBiasAmt * cos(theta - vFoldBiasTheta)) : 1;
-      var fold = 1 + vFold * bias * triWave(vFoldCount * theta + phase)
-        + catAmp * sin(catFreq * yFrac * PI * 2 + 2.6 * sin(theta + phase))
+      // low-frequency seeded modulation of fold amplitude (some folds read deep,
+      // others barely creased) and of local phase (fold spacing drifts up the
+      // body instead of staying perfectly evenly spaced).
+      var ampMod = 1 + 0.42 * sin(2.3 * theta + irregPhaseA) + 0.24 * sin(3.7 * yFrac * PI + irregPhaseB);
+      var phaseDrift = 0.30 * sin(1.6 * yFrac * PI + irregPhaseA) * cos(theta * 0.5 + irregPhaseC);
+      // blend a sharp "tent" crease with a soft sinusoid, the mix itself varying
+      // by angle/seed, so some ridges catch light as crisp creases and others as
+      // shallow, softly-shadowed undulations rather than every fold looking alike.
+      var crispness = 0.5 + 0.5 * sin(1.1 * theta + irregPhaseC);
+      var foldShape = crispness * triWave(vFoldCount * theta + phase + phaseDrift) + (1 - crispness) * sin(vFoldCount * theta + phase + phaseDrift);
+      var fold = 1 + vFold * bias * ampMod * foldShape
+        + catAmp * ampMod * sin(catFreq * yFrac * PI * 2 + 2.6 * sin(theta + phase))
         + micro * cos(microCount * theta + microPhase) * sin(3.1 * theta - microPhase * 0.5);
       var newR = r * fold;
       var nx = newR * cos(theta), nz = newR * sin(theta);
@@ -123,9 +197,16 @@ window.addFigureHelpers = function (THREE, mats, H) {
   // ---- head: displaced sphere (brow, nose, chin) + hair mass, on a neck ----
   function makeHead(size, opts) {
     opts = opts || {};
-    var mat = opts.material || mats.marbleStatue;
+    var mat = opts.material || matMarbleFig;
     var hairMat = opts.hairMaterial || mat;
-    var seg = MOBILE ? 8 : 13;
+    // lowRes: small/distant heads (most pediment figures, relief-scale decoration)
+    // don't need full sphere resolution or a separate hair shell.
+    // lowRes heads (most pediment/caryatid figures) still need eyes/nose/lips to
+    // read as a face rather than a blank dome — bumped from 8 to 10 radial
+    // segments (a handful of extra triangles per head) so the carved sockets and
+    // mouth groove below have enough vertex density to actually show up.
+    var lowRes = !!opts.lowRes || MOBILE;
+    var seg = lowRes ? 12 : 15;
     var geo = new THREE.SphereGeometry(size, seg, Math.max(6, seg - 4));
     var pos = geo.getAttribute('position');
     var arr = pos.array;
@@ -136,7 +217,22 @@ window.addFigureHelpers = function (THREE, mats, H) {
       var front = Math.max(0, nz);
       var push = 0;
       push += 0.09 * size * gaussFall(ny - 0.14, 0.16) * front;               // brow ridge
+      // eye sockets: paired carved recesses just under the brow, flanking the
+      // nose bridge — a real ancient marble face reads by its shadowed sockets
+      // as much as by any raised feature, and without this a head is just a
+      // smooth ovoid no matter how good the nose/chin are.
+      // Director's r1 review: eye sockets/mouth groove existed but were too
+      // shallow to survive the low-res LOD sphere's vertex spacing — deepened
+      // and widened both so the displacement actually clears the facet size.
+      var eyeY = ny + 0.02, eyeFallL = gaussFall(nx + 0.13, 0.11) * gaussFall(eyeY, 0.12) * front;
+      var eyeFallR = gaussFall(nx - 0.13, 0.11) * gaussFall(eyeY, 0.12) * front;
+      push -= 0.085 * size * (eyeFallL + eyeFallR);
       push += 0.34 * size * gaussFall(ny + 0.02, 0.20) * gaussFall(nx, 0.16) * Math.max(0, (nz - 0.5)); // nose
+      // lips: a shallow horizontal groove (philtrum/mouth line) plus a touch of
+      // lower-lip volume between the nose and the chin, giving the lower face a
+      // visible feature instead of blank curvature.
+      push -= 0.07 * size * gaussFall(ny + 0.32, 0.09) * gaussFall(nx, 0.20) * front;
+      push += 0.04 * size * gaussFall(ny + 0.34, 0.05) * gaussFall(nx, 0.17) * front;
       push += 0.13 * size * gaussFall(ny + 0.44, 0.16) * front;               // chin
       var jawPull = (ny < -0.05 && ny > -0.55) ? 0.055 * size * gaussFall(ny + 0.26, 0.24) * Math.max(0, abs(nx) - 0.28) : 0;
       var r = d + push - jawPull;
@@ -151,7 +247,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
     group.add(head);
 
     if (opts.hair !== false) {
-      var hairGeo = new THREE.SphereGeometry(size * 1.1, seg, Math.max(6, seg - 4));
+      var hairGeo = new THREE.SphereGeometry(size * 1.1, seg, Math.max(5, seg - 4));
       hairGeo.scale(1.02, 1.08, 0.94);
       var hp = hairGeo.getAttribute('position');
       var harr = hp.array;
@@ -197,7 +293,40 @@ window.addFigureHelpers = function (THREE, mats, H) {
   // tapered-cylinder segments of slightly different radius meet with a rounded transition
   // instead of a hard plastic-looking step. ----
   function jointBall(pos, r, mat) {
-    return ballMesh(r, MOBILE ? 5 : 7, mat, pos);
+    // small feature regardless of viewing distance — always cheap
+    return ballMesh(r, 5, mat, pos);
+  }
+
+  // ---- broken-limb stump: a rounded, irregular knob that fully covers the cut
+  // cylinder's flat end cap. Root cause of "sharp geometric snap" breaks: a plain
+  // jointBall sized as a fraction of the limb's *start* radius is smaller than
+  // the cylinder's actual cut cross-section at its far (elbow) end, so the flat
+  // circular cap peeks out past the ball — reading exactly like a clean saw-cut
+  // rather than 2500 years of erosion. This sizes the stump to fully envelop that
+  // cut face, and perturbs it with seeded low-frequency noise so it reads as a
+  // pitted, uneven lump instead of a perfect sphere. ----
+  function brokenStump(pos, cutRadius, seed, mat) {
+    var r = cutRadius * 1.25;
+    var geo = new THREE.SphereGeometry(r, MOBILE ? 6 : 7, MOBILE ? 5 : 6);
+    var pa = geo.getAttribute('position');
+    var arr = pa.array;
+    var rnd = makeRng(seed);
+    var ph1 = rnd() * PI * 2, ph2 = rnd() * PI * 2, ph3 = rnd() * PI * 2;
+    for (var i = 0; i < arr.length; i += 3) {
+      var x = arr[i], y = arr[i + 1], z = arr[i + 2];
+      var d = sqrt(x * x + y * y + z * z) || 1;
+      var nx = x / d, ny = y / d, nz = z / d;
+      var theta = atan2(nz, nx);
+      var bump = 1 + 0.16 * sin(4 * theta + ph1) * cos(3 * ny + ph2) + 0.10 * sin(7 * theta - ph3) * sin(5 * ny + ph1);
+      var nr = d * bump;
+      arr[i] = nx * nr; arr[i + 1] = ny * nr; arr[i + 2] = nz * nr;
+    }
+    pa.needsUpdate = true;
+    geo.computeVertexNormals();
+    var mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(pos);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    return mesh;
   }
 
   // ---- braid: a chain of slightly offset tapered segments down the back, each one twisted
@@ -236,6 +365,22 @@ window.addFigureHelpers = function (THREE, mats, H) {
     opts = opts || {};
     var rnd = makeRng(seed);
     var group = new THREE.Group();
+    // LOD: small/distant figures (most pediment statues) get lighter geometry —
+    // fewer radial facets, cheaper joints, no separate hair shell — since the
+    // saved triangles are invisible at that scale but add up fast across 22+ figures.
+    var LOD = MOBILE || height < 3.2;
+    var limbSeg = LOD ? 6 : 9;
+    var footSeg = LOD ? 6 : 8;
+    var neckSeg = LOD ? 6 : 8;
+    // Director's r1 review: pediment drapery read as smooth despite the fold
+    // code because LOD figures (nearly all pediment statues, height < 3.2)
+    // were capped at 12 radial facets on desktop — a fold pattern needs enough
+    // facets to actually show a ridge/valley rather than average it away.
+    // Desktop LOD now gets 16 (mobile keeps 12, the original cheap path);
+    // full-res figures go 20 -> 24.
+    var bodyRadial = LOD ? (MOBILE ? 12 : 16) : 24;
+    var foldScale = opts.foldScale !== undefined ? opts.foldScale : 1;
+    var leanScale = opts.leanScale !== undefined ? opts.leanScale : 1;
     // Classical 7.5-head canon (measured from the ground, y=0 at the feet): ankle ~0.5 head
     // units up, knee ~1.5, hip ~3.5, shoulder ~6, chin/neck-base ~6.5, crown ~7.5 (== height).
     // headSize is the head sphere's radius, so a ~1-head-unit crown-to-chin diameter is
@@ -253,8 +398,8 @@ window.addFigureHelpers = function (THREE, mats, H) {
       if (!contrapposto) return { x: 0, twist: 0 };
       var s = yFrac;
       return {
-        x: weightSide * height * (0.016 * sin(PI * s) + 0.008 * sin(2 * PI * s)),
-        twist: weightSide * 0.09 * sin(PI * s)
+        x: weightSide * height * leanScale * (0.016 * sin(PI * s) + 0.008 * sin(2 * PI * s)),
+        twist: weightSide * 0.09 * leanScale * sin(PI * s)
       };
     }
 
@@ -271,8 +416,10 @@ window.addFigureHelpers = function (THREE, mats, H) {
       new THREE.Vector2(rNeck, neckBaseY)
     ];
     var body = foldedLathe(profile, {
-      material: mat, seed: seed, span: neckBaseY, lean: lean,
-      vFoldCount: 16, vFold: 0.15, catAmp: 0.07, catFreq: 2.2,
+      material: mat, seed: seed, span: neckBaseY, lean: lean, radial: bodyRadial,
+      // Director's r1 review: fold amplitude/count were too shallow/sparse to
+      // read as drapery at all (0.15 depth, 16 ridges) — deepened and densified.
+      vFoldCount: 20, vFold: 0.23 * foldScale, catAmp: 0.09 * foldScale, catFreq: 2.2,
       vFoldBiasTheta: weightSide > 0 ? PI * 0.15 : PI * 1.15, vFoldBiasAmt: 0.5
     });
     group.add(body);
@@ -281,48 +428,69 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // the figure's legs taper to a point at ground level and it reads as floating.
     var footLen = height * 0.10, footR0 = rHem * 0.60, footR1 = rHem * 0.28;
     var footDir = new THREE.Vector3(0, 0, 1);
-    group.add(makeFoot(new THREE.Vector3(-rHem * 0.42, ankleY, 0), footDir, footLen, footR0, footR1, mat));
-    group.add(makeFoot(new THREE.Vector3(rHem * 0.42, ankleY, 0), footDir, footLen, footR0, footR1, mat));
+    group.add(makeFoot(new THREE.Vector3(-rHem * 0.42, ankleY, 0), footDir, footLen, footR0, footR1, mat, footSeg));
+    group.add(makeFoot(new THREE.Vector3(rHem * 0.42, ankleY, 0), footDir, footLen, footR0, footR1, mat, footSeg));
 
     var shoulderW = rShoulder * 0.92;
     var armR0 = 0.032 * height, armR1 = 0.024 * height, handR = 0.021 * height;
-    // relaxed arm (weight-bearing side)
-    var s0 = -weightSide;
-    var relShY = new THREE.Vector3(s0 * shoulderW, shoulderY, 0.015 * height);
-    var relEl = new THREE.Vector3(s0 * shoulderW * 1.05, shoulderY - 0.17 * height, 0.02 * height);
-    var relWr = new THREE.Vector3(s0 * shoulderW * 0.85, hipY + 0.02 * height, 0.03 * height);
-    group.add(taperedLimb(relShY, relEl, armR0, (armR0 + armR1) / 2, MOBILE ? 6 : 9, mat));
-    group.add(taperedLimb(relEl, relWr, (armR0 + armR1) / 2, armR1, MOBILE ? 6 : 9, mat));
-    group.add(jointBall(relShY, armR0 * 0.92, mat));
-    group.add(jointBall(relEl, (armR0 + armR1) / 2 * 0.95, mat));
-    group.add(ballMesh(handR, MOBILE ? 5 : 7, mat, relWr));
+    var s0 = -weightSide, s1 = weightSide;
 
-    // bent arm holding the drape fold
-    var s1 = weightSide;
-    var benShY = new THREE.Vector3(s1 * shoulderW, shoulderY, 0.015 * height);
-    var benEl = new THREE.Vector3(s1 * shoulderW * 1.18, shoulderY - 0.10 * height, 0.11 * height);
-    var benWr = new THREE.Vector3(s1 * shoulderW * 0.55, shoulderY - 0.01 * height, 0.17 * height);
-    group.add(taperedLimb(benShY, benEl, armR0, (armR0 + armR1) / 2, MOBILE ? 6 : 9, mat));
-    group.add(taperedLimb(benEl, benWr, (armR0 + armR1) / 2, armR1, MOBILE ? 6 : 9, mat));
-    group.add(jointBall(benShY, armR0 * 0.92, mat));
-    group.add(jointBall(benEl, (armR0 + armR1) / 2 * 0.95, mat));
-    group.add(ballMesh(handR, MOBILE ? 5 : 7, mat, benWr));
+    if (opts.arms !== false) {
+      // Authentic breakage: a deterministic fraction of figures lose a forearm at
+      // the elbow (surviving pediment marbles almost never have all four limbs
+      // intact) instead of every statue reading as a pristine mannequin.
+      var breakRoll = rnd();
+      var breakArm = breakRoll < 0.30 ? (breakRoll < 0.15 ? 'relaxed' : 'bent') : null;
+
+      // relaxed arm (weight-bearing side)
+      var relShY = new THREE.Vector3(s0 * shoulderW, shoulderY, 0.015 * height);
+      var relEl = new THREE.Vector3(s0 * shoulderW * 1.05, shoulderY - 0.17 * height, 0.02 * height);
+      var relWr = new THREE.Vector3(s0 * shoulderW * 0.85, hipY + 0.02 * height, 0.03 * height);
+      group.add(taperedLimb(relShY, relEl, armR0, (armR0 + armR1) / 2, limbSeg, mat));
+      group.add(jointBall(relShY, armR0 * 0.92, mat));
+      if (breakArm === 'relaxed') {
+        group.add(brokenStump(relEl, (armR0 + armR1) / 2, seed + 401, mat)); // eroded broken stump
+      } else {
+        group.add(taperedLimb(relEl, relWr, (armR0 + armR1) / 2, armR1, limbSeg, mat));
+        group.add(jointBall(relEl, (armR0 + armR1) / 2 * 0.95, mat));
+        group.add(ballMesh(handR, 5, mat, relWr));
+      }
+
+      // bent arm holding the drape fold
+      var benShY = new THREE.Vector3(s1 * shoulderW, shoulderY, 0.015 * height);
+      var benEl = new THREE.Vector3(s1 * shoulderW * 1.18, shoulderY - 0.10 * height, 0.11 * height);
+      var benWr = new THREE.Vector3(s1 * shoulderW * 0.55, shoulderY - 0.01 * height, 0.17 * height);
+      group.add(taperedLimb(benShY, benEl, armR0, (armR0 + armR1) / 2, limbSeg, mat));
+      group.add(jointBall(benShY, armR0 * 0.92, mat));
+      if (breakArm === 'bent') {
+        group.add(brokenStump(benEl, (armR0 + armR1) / 2, seed + 402, mat));
+      } else {
+        group.add(taperedLimb(benEl, benWr, (armR0 + armR1) / 2, armR1, limbSeg, mat));
+        group.add(jointBall(benEl, (armR0 + armR1) / 2 * 0.95, mat));
+        group.add(ballMesh(handR, 5, mat, benWr));
+      }
+    }
 
     // himation sash: a light diagonal drape from the far shoulder to the near hip
     if (opts.sash !== false) {
       var sashA = new THREE.Vector3(-s0 * shoulderW * 0.7, shoulderY + 0.02 * height, 0.06 * height);
       var sashMid = new THREE.Vector3(0, (shoulderY + hipY) / 2, 0.10 * height);
       var sashB = new THREE.Vector3(s0 * rHip * 0.9, hipY - 0.03 * height, 0.06 * height);
-      group.add(taperedLimb(sashA, sashMid, 0.05 * height, 0.045 * height, MOBILE ? 6 : 8, mat));
-      group.add(taperedLimb(sashMid, sashB, 0.045 * height, 0.03 * height, MOBILE ? 6 : 8, mat));
+      group.add(taperedLimb(sashA, sashMid, 0.05 * height, 0.045 * height, limbSeg, mat));
+      group.add(taperedLimb(sashMid, sashB, 0.045 * height, 0.03 * height, limbSeg, mat));
     }
 
-    var neck = taperedLimb(new THREE.Vector3(lean(neckBaseY / neckBaseY).x, neckBaseY, 0), new THREE.Vector3(lean(1).x, neckBaseY + 0.045 * height, 0), rNeck, rNeck * 0.9, MOBILE ? 6 : 8, mat);
+    var neck = taperedLimb(new THREE.Vector3(lean(neckBaseY / neckBaseY).x, neckBaseY, 0), new THREE.Vector3(lean(1).x, neckBaseY + 0.045 * height, 0), rNeck, rNeck * 0.9, neckSeg, mat);
     group.add(neck);
 
-    var headGroup = makeHead(headSize, { material: mat, hairMaterial: opts.hairMaterial || mat });
+    var headGroup = makeHead(headSize, { material: mat, hairMaterial: opts.hairMaterial || mat, lowRes: LOD, hair: !LOD });
     var headLean = lean(1);
     headGroup.position.set(headLean.x, neckBaseY + 0.045 * height + headSize * 0.95, headLean.z || 0);
+    // Heads turned off-axis break up the "row of identical mannequins" look —
+    // deterministic per seed, and skippable (headTurn: 0) for statues like the
+    // Promachos whose helmet geometry assumes a forward-facing head.
+    var headTurnRange = opts.headTurn !== undefined ? opts.headTurn : 0.9;
+    headGroup.rotation.y = (rnd() - 0.5) * headTurnRange;
     group.add(headGroup);
 
     return { group: group, hipY: hipY, shoulderY: shoulderY, headTopY: headTopY, maxR: Math.max(rShoulder, rHip), headSize: headSize };
@@ -331,6 +499,10 @@ window.addFigureHelpers = function (THREE, mats, H) {
   // ================= KNEEL / SEATED bodies (bespoke legs) =================
   function buildBentBody(height, mat, seed, hipY, shoulderFrac, legJoints) {
     var group = new THREE.Group();
+    var rnd = makeRng(seed + 500);
+    var LOD = MOBILE || height < 3.2;
+    var limbSeg = LOD ? 6 : 8;
+    var bodyRadial = LOD ? 12 : 18;
     var shoulderY = hipY + (height - hipY) * shoulderFrac;
     var neckBaseY = hipY + (height - hipY) * (shoulderFrac + 0.06);
     var headSize = 0.041 * height;
@@ -344,7 +516,9 @@ window.addFigureHelpers = function (THREE, mats, H) {
       new THREE.Vector2(rShoulder, (shoulderY - hipY)),
       new THREE.Vector2(rNeck, (neckBaseY - hipY))
     ];
-    var torso = foldedLathe(profile, { material: mat, seed: seed, span: neckBaseY - hipY, vFold: 0.13, vFoldCount: 15, catAmp: 0.065 });
+    // Slightly deeper folds than the base version (0.13/0.065) — seated/kneeling
+    // drapery pools and creases more than a standing figure's.
+    var torso = foldedLathe(profile, { material: mat, seed: seed, span: neckBaseY - hipY, radial: bodyRadial, vFold: 0.17, vFoldCount: 15, catAmp: 0.085 });
     torso.position.y = hipY;
     group.add(torso);
 
@@ -353,7 +527,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
       for (var i = 0; i < chain.length - 1; i++) {
         var t0 = i / (chain.length - 1), t1 = (i + 1) / (chain.length - 1);
         var r0 = 0.075 * height * (1 - 0.35 * t0), r1 = 0.075 * height * (1 - 0.35 * t1);
-        group.add(taperedLimb(chain[i], chain[i + 1], r0, r1, MOBILE ? 6 : 8, mat));
+        group.add(taperedLimb(chain[i], chain[i + 1], r0, r1, limbSeg, mat));
         if (i > 0) group.add(jointBall(chain[i], r0 * 0.95, mat)); // knee
       }
       // foot at the chain's ground end, oriented along the last segment's horizontal direction,
@@ -363,27 +537,39 @@ window.addFigureHelpers = function (THREE, mats, H) {
       var toeDir = new THREE.Vector3(ankle.x - prevJoint.x, 0, ankle.z - prevJoint.z);
       if (toeDir.lengthSq() < 1e-6) toeDir.set(0, 0, 1); else toeDir.normalize();
       group.add(jointBall(ankle, 0.040 * height, mat));
-      group.add(makeFoot(ankle, toeDir, height * 0.095, 0.052 * height, 0.024 * height, mat));
+      group.add(makeFoot(ankle, toeDir, height * 0.095, 0.052 * height, 0.024 * height, mat, limbSeg));
     }
 
     var armR0 = 0.030 * height, armR1 = 0.022 * height, shoulderW = rShoulder * 0.9;
     var sides = [1, -1];
+    // Authentic breakage here too: about 30% of kneeling/seated figures lose one
+    // forearm at the elbow.
+    var breakRoll = rnd();
+    var breakSide = breakRoll < 0.30 ? sides[breakRoll < 0.15 ? 0 : 1] : null;
     for (var a = 0; a < 2; a++) {
       var sx = sides[a];
       var sh = new THREE.Vector3(sx * shoulderW, shoulderY, 0.01 * height);
       var el = new THREE.Vector3(sx * shoulderW * 1.1, shoulderY - 0.14 * height, 0.06 * height);
       var wr = new THREE.Vector3(sx * shoulderW * 0.7, shoulderY - 0.26 * height, 0.10 * height);
-      group.add(taperedLimb(sh, el, armR0, (armR0 + armR1) / 2, MOBILE ? 6 : 8, mat));
-      group.add(taperedLimb(el, wr, (armR0 + armR1) / 2, armR1, MOBILE ? 6 : 8, mat));
+      group.add(taperedLimb(sh, el, armR0, (armR0 + armR1) / 2, limbSeg, mat));
       group.add(jointBall(sh, armR0 * 0.9, mat));
-      group.add(jointBall(el, (armR0 + armR1) / 2 * 0.95, mat));
-      group.add(ballMesh(0.02 * height, MOBILE ? 5 : 7, mat, wr));
+      if (sx === breakSide) {
+        group.add(brokenStump(el, (armR0 + armR1) / 2, seed + 403 + a, mat));
+      } else {
+        group.add(taperedLimb(el, wr, (armR0 + armR1) / 2, armR1, limbSeg, mat));
+        group.add(jointBall(el, (armR0 + armR1) / 2 * 0.95, mat));
+        group.add(ballMesh(0.02 * height, 5, mat, wr));
+      }
     }
 
-    var neck = taperedLimb(new THREE.Vector3(0, neckBaseY, 0), new THREE.Vector3(0, neckBaseY + 0.045 * height, 0), rNeck, rNeck * 0.9, MOBILE ? 6 : 8, mat);
+    var neck = taperedLimb(new THREE.Vector3(0, neckBaseY, 0), new THREE.Vector3(0, neckBaseY + 0.045 * height, 0), rNeck, rNeck * 0.9, limbSeg, mat);
     group.add(neck);
-    var headGroup = makeHead(headSize, { material: mat });
+    var headGroup = makeHead(headSize, { material: mat, lowRes: LOD, hair: !LOD });
     headGroup.position.set(0, neckBaseY + 0.045 * height + headSize * 0.95, 0);
+    // turned/tilted head — seated and kneeling pediment figures traditionally
+    // look toward the temple's central axis rather than stare straight out.
+    headGroup.rotation.y = (rnd() - 0.5) * 1.1;
+    headGroup.rotation.x = (rnd() - 0.5) * 0.25;
     group.add(headGroup);
 
     return { group: group, headTopY: neckBaseY + 0.09 * height + headSize * 2, maxR: Math.max(rShoulder, rHip) };
@@ -393,12 +579,18 @@ window.addFigureHelpers = function (THREE, mats, H) {
   // o.pose: 'stand' | 'kneel' | 'seated' | 'recline'
   //   stand/kneel/seated: origin at the feet (y=0 on the ground).
   //   recline: figure lies along +x with the head toward -x; origin is on the ground under the hips.
+  // Callers (e.g. H.makePediment in 02-helpers.js) build many figures of the same
+  // pose without ever passing a seed, so without this every 'stand' figure in the
+  // scene would share the exact same fold phase, head turn and breakage — reading
+  // as one mannequin duplicated down the row. Auto-incrementing keeps every
+  // unseeded call distinct while staying fully deterministic (no runtime RNG).
+  var __figureAutoSeed = 100;
   H.makeFigure = function (height, o) {
     height = height !== undefined ? height : 1.8;
     o = o || {};
     var pose = o.pose || 'stand';
-    var mat = o.material || mats.marbleStatue;
-    var seed = o.seed || 11;
+    var mat = o.material || matMarbleFig;
+    var seed = o.seed !== undefined ? o.seed : (__figureAutoSeed += 17);
 
     if (pose === 'stand') {
       return buildStandingBody(height, mat, seed, o).group;
@@ -428,7 +620,10 @@ window.addFigureHelpers = function (THREE, mats, H) {
 
     // recline: build the upright body then rotate it down onto its back so it runs along +x,
     // head toward -x, resting on the ground under the hips (this file's local origin convention).
-    var built = buildStandingBody(height, mat, seed, { contrapposto: false, sash: o.sash });
+    var built = buildStandingBody(height, mat, seed, {
+      contrapposto: false, sash: o.sash, arms: o.arms,
+      foldScale: o.foldScale, leanScale: o.leanScale, headTurn: o.headTurn
+    });
     var g = built.group;
     g.rotation.z = PI / 2;
     g.position.x += built.hipY;
@@ -440,24 +635,40 @@ window.addFigureHelpers = function (THREE, mats, H) {
   // Erechtheion kore: peplos with deep vertical folds on the supporting leg, the bent free leg
   // pressing through the drapery, braids down the back, capital (echinus + abacus/kalathos) on the
   // head. Origin at the plinth base; total height (plinth to capital top) == height. Faces -z.
+  // Real korai are sturdy — broad-shouldered, full-hipped, built to visually carry
+  // an entablature — not slim figure statues. Proportions below are ~1.3x the
+  // original girth (radii only; scaling doesn't add a single extra triangle).
+  // Successive calls (the 6 porch figures) auto-alternate which leg bears the
+  // weight, as on the real porch, and get a distinct head turn, purely from a
+  // module-level call counter — no change needed at the 05-erechtheion.js call site.
+  var __caryatidCallIdx = 0;
   H.makeCaryatid = function (height) {
     height = height !== undefined ? height : 2.3;
-    var mat = mats.marbleStatue;
-    var seed = 31;
+    var mat = matMarbleFig;
+    var callIdx = __caryatidCallIdx++;
+    var seed = 31 + callIdx * 13;
+    var rnd = makeRng(seed + 900);
     var group = new THREE.Group();
 
     var plinthH = 0.05 * height;
-    var plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.38, plinthH, MOBILE ? 10 : 16), mats.marble);
+    var plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.47, plinthH, MOBILE ? 10 : 16), mats.marble);
     plinth.position.y = plinthH / 2;
     plinth.castShadow = true; plinth.receiveShadow = true;
     group.add(plinth);
 
     var shoulderY = 0.775 * height;
     var neckBaseY = 0.815 * height;
-    var headSize = 0.075 * height;
-    var supportSide = 1; // +x leg is the straight (weight-bearing) leg; -x leg is the bent free leg
+    var headSize = 0.084 * height;
+    // alternate which leg bears the weight, mirroring the real porch's arrangement
+    var supportSide = (callIdx % 2 === 0) ? 1 : -1;
 
-    var rBase = 0.145, rCalf = 0.135, rKnee = 0.145, rHip = 0.175, rWaist = 0.150, rChest = 0.170, rShoulder = 0.150, rNeck = 0.075;
+    // Director's r1 review: shoulders (0.195) were still narrower than the hips
+    // (0.228), so despite the earlier 1.3x girth bump the silhouette read as
+    // bottom-heavy/peg-like rather than a sturdy, broad-shouldered kore built
+    // to visually carry an entablature. Widened the shoulder/chest, kept the
+    // waist relatively slim so it still nips in above the hip for a readable
+    // torso shape instead of a uniform tube.
+    var rBase = 0.188, rCalf = 0.176, rKnee = 0.188, rHip = 0.228, rWaist = 0.185, rChest = 0.236, rShoulder = 0.238, rNeck = 0.096;
     var profile = [
       new THREE.Vector2(rBase, plinthH),
       new THREE.Vector2(rCalf, 0.14 * height),
@@ -470,9 +681,12 @@ window.addFigureHelpers = function (THREE, mats, H) {
       new THREE.Vector2(rNeck, neckBaseY)
     ];
     var body = foldedLathe(profile, {
-      material: mat, seed: seed, span: neckBaseY, radial: MOBILE ? 12 : 22,
-      vFold: 0.17, vFoldCount: 17, vFoldBiasTheta: supportSide > 0 ? 0 : PI, vFoldBiasAmt: 0.65,
-      catAmp: 0.075, catFreq: 3,
+      material: mat, seed: seed, span: neckBaseY, radial: MOBILE ? 12 : 24,
+      // Director's r1 review: peplos still read smooth — deepened the fold
+      // amplitude/count and the catenary swag further for heavy, sculptural
+      // vertical folds (real korai drapery is thick wool, not a thin sheet).
+      vFold: 0.30, vFoldCount: 21, vFoldBiasTheta: supportSide > 0 ? 0 : PI, vFoldBiasAmt: 0.8,
+      catAmp: 0.13, catFreq: 3,
       // the free leg's bent knee presses through the drapery as a localized bulge, and a seam
       // running knee-to-ankle where the fabric is drawn tight over the shin — this is what
       // differentiates the free leg's drape from the straight support leg's vertical folds.
@@ -482,13 +696,13 @@ window.addFigureHelpers = function (THREE, mats, H) {
         var thetaFree = -supportSide > 0 ? 0 : PI;
         var nearKnee = gaussFall(yFrac - kneeFrac, 0.10);
         var nearTheta = gaussFall(((theta - thetaFree + PI) % (2 * PI)) - PI, 0.9);
-        var kneeBulge = 0.028 * height * nearKnee * nearTheta;
+        var kneeBulge = 0.036 * height * nearKnee * nearTheta;
 
         var seamTheta = thetaFree + 0.4;
         var seamBand = Math.max(0, Math.min(1, (kneeFrac - yFrac) / (kneeFrac - ankleFrac)));
         var seamProfile = sin(seamBand * PI); // 0 at the ankle and knee, peaks mid-shin
         var seamFall = gaussFall(((theta - seamTheta + PI) % (2 * PI)) - PI, 0.16);
-        var seamPull = -0.020 * height * seamProfile * seamFall;
+        var seamPull = -0.026 * height * seamProfile * seamFall;
 
         return kneeBulge + seamPull;
       }
@@ -496,7 +710,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
     group.add(body);
 
     // stub arms at the sides (forearms broken off, as on the surviving Caryatids)
-    var armR = 0.045 * height;
+    var armR = 0.052 * height;
     var stubShY = shoulderY - 0.02 * height;
     group.add(taperedLimb(new THREE.Vector3(-rShoulder * 0.85, stubShY, 0), new THREE.Vector3(-rShoulder * 1.05, stubShY - 0.14 * height, 0.02 * height), armR, armR * 0.8, MOBILE ? 6 : 8, mat));
     group.add(taperedLimb(new THREE.Vector3(rShoulder * 0.85, stubShY, 0), new THREE.Vector3(rShoulder * 1.05, stubShY - 0.14 * height, 0.02 * height), armR, armR * 0.8, MOBILE ? 6 : 8, mat));
@@ -507,25 +721,33 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var headGroup = makeHead(headSize, { material: mat, hair: false });
     var headY = neckBaseY + 0.035 * height + headSize * 0.9;
     headGroup.position.y = headY;
+    // a small per-figure head turn so the row doesn't read as identical pegs
+    headGroup.rotation.y = supportSide * 0.10 + (rnd() - 0.5) * 0.14;
     group.add(headGroup);
 
-    // long braids down the back (front faces -z, so the back is +z)
-    var braidTop = new THREE.Vector3(0, headY + headSize * 0.3, headSize * 0.85);
+    // long, thick braids down the back (front faces -z, so the back is +z).
+    // Director's r1 review: braids were invisible — too thin (0.32/0.075 head
+    // radii) and starting right at the head/capital seam where the echinus
+    // overhangs and shadows them. Thickened the braid and started it a touch
+    // lower, clear of the capital's underside, so it reads as a real coiled
+    // mass against the back rather than disappearing into the join.
+    var braidTop = new THREE.Vector3(0, headY + headSize * 0.05, headSize * 0.90);
     for (var bi = -1; bi <= 1; bi += 2) {
-      var top = braidTop.clone(); top.x = bi * headSize * 0.35;
-      var braid = buildBraid(top, new THREE.Vector3(0, -1, 0.05), shoulderY - headY + headSize, headSize * 0.24, headSize * 0.055, MOBILE ? 7 : 12, seed + bi, mat);
+      var top = braidTop.clone(); top.x = bi * headSize * 0.38;
+      var braid = buildBraid(top, new THREE.Vector3(0, -1, 0.05), shoulderY - headY + headSize * 1.3, headSize * 0.40, headSize * 0.11, MOBILE ? 8 : 15, seed + bi, mat);
       group.add(braid);
     }
 
-    // capital: echinus (fluted, curved profile) + abacus (kalathos) resting on the head,
-    // top of abacus == height
-    var abacusH = 0.05 * height, echinusH = 0.045 * height;
+    // capital: a heavy, cushion-like echinus (fuller curve, taller) + abacus (kalathos)
+    // resting on the head, top of abacus == height
+    var abacusH = 0.06 * height, echinusH = 0.065 * height;
     var kalathosTop = height;
     var echinusY = kalathosTop - abacusH - echinusH / 2;
     var echinusProfile = [
       new THREE.Vector2(headSize * 1.15, 0),
-      new THREE.Vector2(headSize * 1.30, echinusH * 0.4),
-      new THREE.Vector2(headSize * 1.55, echinusH)
+      new THREE.Vector2(headSize * 1.48, echinusH * 0.32),
+      new THREE.Vector2(headSize * 1.68, echinusH * 0.68),
+      new THREE.Vector2(headSize * 1.62, echinusH)
     ];
     var echinus = foldedLathe(echinusProfile, {
       material: mats.marble, seed: seed + 5, span: echinusH, radial: MOBILE ? 12 : 20,
@@ -533,7 +755,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
     });
     echinus.position.y = echinusY - echinusH / 2;
     group.add(echinus);
-    var abacus = new THREE.Mesh(new THREE.BoxGeometry(headSize * 3.3, abacusH, headSize * 3.3), mats.marble);
+    var abacus = new THREE.Mesh(new THREE.BoxGeometry(headSize * 3.5, abacusH, headSize * 3.5), mats.marble);
     abacus.position.y = kalathosTop - abacusH / 2;
     abacus.castShadow = true; abacus.receiveShadow = true;
     group.add(abacus);
@@ -568,13 +790,23 @@ window.addFigureHelpers = function (THREE, mats, H) {
     return merged;
   }
 
-  // A flattened, low-relief humanoid built from a handful of boxes/cylinders squashed in z.
-  function reliefFigureGeoms(cx, baseY, fh, depth, seed, lowDetail) {
+  // A flattened, low-relief figure built from a handful of boxes squashed in z —
+  // boxes (12 tris each) rather than the previous cylinders/spheres (20-48 tris
+  // each) because a relief panel this small never shows the difference in
+  // roundness, and there can be well over 150 of these across the temple's
+  // metopes and friezes, where every triangle is multiplied by that count.
+  // variant: 'lapith' (human, weapon arm raised) | 'centaur' (human torso on an
+  // elongated four-legged body) | 'procession' (walking figure, frieze default).
+  function reliefFigureGeoms(cx, baseY, fh, depth, seed, lowDetail, variant) {
     var rnd = makeRng(seed);
     var geoms = [];
-    var legR = fh * 0.045, torsoW = fh * 0.22, torsoH = fh * 0.42, headR = fh * 0.11;
+    var legR = fh * 0.09, torsoW = fh * 0.22, torsoH = fh * 0.40, headS = fh * 0.16;
     var stance = (rnd() - 0.5) * fh * 0.18;
-    var armSwing = (rnd() - 0.5) * fh * 0.3;
+    // Director's r1 review: metope/frieze figures read as generic and static —
+    // widened the swing range so limbs spread further from a neutral pose,
+    // giving combat pairs and marchers alike more dynamic, varied silhouettes.
+    var armSwing = (rnd() - 0.5) * fh * 0.6;
+    var dz = Math.min(depth, fh * 0.5);
 
     function pushBox(w, h, d, x, y, z, rz) {
       var bg = new THREE.BoxGeometry(w, h, Math.min(d, depth));
@@ -582,37 +814,73 @@ window.addFigureHelpers = function (THREE, mats, H) {
       bg.translate(x, y, z);
       geoms.push(bg);
     }
-    function pushCyl(r0, r1, len, x, y, z, rx, rz) {
-      var cg = new THREE.CylinderGeometry(r0, r1, len, lowDetail ? 5 : 7, 1);
-      if (rx) cg.rotateX(rx);
-      if (rz) cg.rotateZ(rz);
-      cg.scale(1, 1, Math.min(1, (depth * 1.6) / (r0 * 2 || depth)));
-      cg.translate(x, y, z);
-      geoms.push(cg);
+
+    if (variant === 'centaur') {
+      // Human torso and arms rising from an elongated four-legged horse body —
+      // reads clearly as a centaur in silhouette without a full quadruped rig.
+      var bodyLen = fh * 0.62, bodyH = fh * 0.30;
+      pushBox(bodyLen, bodyH, depth * 0.9, cx + fh * 0.05, baseY + bodyH * 0.55, 0, 0);
+      // Foreleg/hindleg distinction (director's r1 review: all four legs read
+      // identically): the forelegs (nearer the human torso, lg 2-3) rear up —
+      // raised higher, bent at a steeper angle, as a centaur lunging into a
+      // fight would — while the hindlegs (lg 0-1) stay planted and vertical.
+      // Same box count/cost, just reposed.
+      for (var lg = 0; lg < 4; lg++) {
+        var lx = cx - bodyLen * 0.32 + lg * (bodyLen * 0.6 / 3);
+        var isFore = lg >= 2;
+        var legRot = isFore ? (lg < 3 ? -0.55 : 0.45) : (lg < 1 ? -0.05 : 0.05);
+        var legY = baseY + fh * (isFore ? 0.24 : 0.19);
+        pushBox(legR * 0.75, fh * (isFore ? 0.40 : 0.36), legR * 0.75, lx, legY, isFore ? dz * 0.12 : 0, legRot);
+      }
+      var htx = cx + bodyLen * 0.30;
+      pushBox(torsoW * 0.9, torsoH, depth * 0.85, htx, baseY + bodyH + torsoH * 0.5, dz * 0.1, 0.08);
+      pushBox(legR * 0.7, fh * 0.30, legR * 0.7, htx - torsoW * 0.4, baseY + bodyH + fh * 0.18, dz * 0.15, 0.6 + armSwing * 0.01);
+      pushBox(legR * 0.7, fh * 0.30, legR * 0.7, htx + torsoW * 0.4, baseY + bodyH + fh * 0.18, dz * 0.15, -0.6 - armSwing * 0.01);
+      pushBox(headS, headS, Math.min(headS, depth), htx, baseY + bodyH + torsoH + headS * 0.5, dz * 0.2, 0);
+      return geoms;
     }
 
-    // legs
-    pushCyl(legR, legR * 0.85, fh * 0.42, cx - fh * 0.07 + stance * 0.4, baseY + fh * 0.21, 0, 0, 0.05);
-    pushCyl(legR, legR * 0.85, fh * 0.42, cx + fh * 0.07 - stance * 0.4, baseY + fh * 0.21, 0, 0, -0.05);
+    // legs (biped: Lapith fighters and procession walkers alike)
+    pushBox(legR, fh * 0.42, legR, cx - fh * 0.07 + stance * 0.4, baseY + fh * 0.21, 0, 0.05);
+    pushBox(legR, fh * 0.42, legR, cx + fh * 0.07 - stance * 0.4, baseY + fh * 0.21, 0, -0.05);
     // torso
     pushBox(torsoW, torsoH, depth * 0.9, cx, baseY + fh * 0.42 + torsoH / 2, 0, 0);
-    // arms
-    pushCyl(legR * 0.8, legR * 0.6, fh * 0.36, cx - torsoW * 0.55 + armSwing * 0.3, baseY + fh * 0.62, depth * 0.1, 0, 0.5 + armSwing * 0.01);
-    pushCyl(legR * 0.8, legR * 0.6, fh * 0.36, cx + torsoW * 0.55 - armSwing * 0.3, baseY + fh * 0.62, depth * 0.1, 0, -0.5 - armSwing * 0.01);
+    // arms — a Lapith gets one arm raised overhead with a weapon; everyone else swings both
+    var armLen = fh * 0.36;
+    var raised = variant === 'lapith';
+    // off-hand: a Lapith's non-weapon arm grips a shield braced in front of the
+    // body rather than just swinging free — its hand pose bends toward the
+    // shield face instead of hanging straight down.
+    var offArmX = cx - torsoW * 0.55 + armSwing * 0.3;
+    var offArmRot = raised ? 0.85 : (0.5 + armSwing * 0.01);
+    pushBox(legR * 0.75, armLen, legR * 0.75, offArmX, baseY + fh * (raised ? 0.55 : 0.62), dz * 0.1, offArmRot);
+    pushBox(legR * 0.75, armLen, legR * 0.75, cx + torsoW * 0.55 - armSwing * 0.3, baseY + fh * (raised ? 0.74 : 0.62), dz * 0.1, raised ? -1.15 : (-0.5 - armSwing * 0.01));
+    if (raised) {
+      // weapon: a thin diagonal bar gripped in the raised hand
+      pushBox(legR * 0.35, fh * 0.34, legR * 0.35, cx + torsoW * 0.85, baseY + fh * 0.92, dz * 0.15, -0.3);
+      // shield: a round hoplite shield (approximated as a flattened disc-like
+      // box, cheap and readable at metope scale) braced on the off arm,
+      // covering the torso's near side — without it a Lapith is just a bare
+      // fighter with a stick, not a readable combat scene.
+      var shieldR = fh * 0.30;
+      pushBox(shieldR * 2, shieldR * 2, depth * 0.55, offArmX - legR * 0.4, baseY + fh * 0.46, dz * 0.05, 0);
+    }
     // head
-    var headGeo = new THREE.SphereGeometry(headR, lowDetail ? 6 : 8, lowDetail ? 5 : 6);
-    headGeo.scale(1, 1, Math.min(1, depth / headR));
-    headGeo.translate(cx, baseY + fh * 0.42 + torsoH + headR * 0.9, depth * 0.15);
-    geoms.push(headGeo);
+    pushBox(headS, headS, Math.min(headS, depth), cx, baseY + fh * 0.42 + torsoH + headS * 0.5, dz * 0.15, 0);
 
     if (!lowDetail) {
       // a light drape fold across the torso for frieze-grade panels
-      pushBox(torsoW * 1.1, torsoH * 0.14, depth * 0.7, cx, baseY + fh * 0.5, depth * 0.25, 0.3);
+      pushBox(torsoW * 1.1, torsoH * 0.14, depth * 0.7, cx, baseY + fh * 0.5, dz * 0.25, 0.3);
     }
     return geoms;
   }
 
   // H.makeRelief(w, h, {figures, lowDetail, seed}) -> single merged Mesh, mats.marbleRelief.
+  // Square-ish panels (w/h < 2.2, i.e. metope-shaped) get an alternating Lapith/
+  // centaur combat pair; wide strips (friezes) get a plain marching procession —
+  // this is decided from the panel's own proportions so every existing call site
+  // (metopes, the Panathenaic frieze, the altar frieze) gets the right reading
+  // without needing to pass a new option.
   H.makeRelief = function (w, h, o) {
     o = o || {};
     var figures = o.figures !== undefined ? o.figures : 2;
@@ -620,6 +888,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var seed = (o.seed !== undefined ? o.seed : 1) * 97 + 13;
     var depth = 0.15;
     var slabThickness = depth * 0.5;
+    var combat = (w / h) < 2.2;
 
     var geoms = [];
     var slab = new THREE.BoxGeometry(w, h, slabThickness);
@@ -632,7 +901,8 @@ window.addFigureHelpers = function (THREE, mats, H) {
       var fx = (t - 0.5) * w * 0.82;
       var fh = h * (lowDetail ? 0.80 : 0.86);
       var baseY = -h / 2 + h * 0.03;
-      var fgeoms = reliefFigureGeoms(fx, baseY, fh, reliefDepth, seed + i * 7, lowDetail);
+      var variant = combat ? (i % 2 === 0 ? 'lapith' : 'centaur') : 'procession';
+      var fgeoms = reliefFigureGeoms(fx, baseY, fh, reliefDepth, seed + i * 7, lowDetail, variant);
       for (var k = 0; k < fgeoms.length; k++) geoms.push(fgeoms[k]);
     }
 
@@ -667,8 +937,14 @@ window.addFigureHelpers = function (THREE, mats, H) {
     group.add(cap);
 
     var height = 9;
-    var mat = mats.bronzePatina;
-    var built = buildStandingBody(height, mat, seed, { weightSide: 1, sash: true });
+    var mat = matBronzeFig;
+    // arms:false — this statue's arms are custom-built below (shield arm, spear arm);
+    // building buildStandingBody's own default pair too would leave two overlapping
+    // sets of limbs, which is exactly what made earlier renders read as a confused
+    // dark blob rather than a clean silhouette. foldScale/leanScale exaggerate the
+    // peplos folds and the contrapposto lean so the bronze reads as a shaped figure
+    // — not flat color — even under the patina's dark, uneven material.
+    var built = buildStandingBody(height, mat, seed, { weightSide: 1, sash: true, arms: false, foldScale: 2.1, leanScale: 1.3, headTurn: 0 });
     var statue = built.group;
     statue.position.y = plinthH;
     group.add(statue);
@@ -683,10 +959,13 @@ window.addFigureHelpers = function (THREE, mats, H) {
     helm.position.y = helmCenterY;
     helm.castShadow = true; helm.receiveShadow = true;
     group.add(helm);
-    // nose guard: a 4-sided (box-like) tapered prism, wide at the brow, narrowing to a point at the chin
-    var noseGuard = new THREE.Mesh(new THREE.CylinderGeometry(helmR * 0.05, helmR * 0.15, helmR * 1.15, 4), mat);
+    // nose guard: a 4-sided (box-like) tapered prism, wide at the brow, narrowing to a point at the chin.
+    // Pushed further forward of the dome (0.85 -> 0.97 * helmR) than before so a real
+    // shadow gap opens between it and the cheek flaps — at render distance a helmet
+    // whose features sit flush with the dome reads as one dark unbroken blob.
+    var noseGuard = new THREE.Mesh(new THREE.CylinderGeometry(helmR * 0.06, helmR * 0.17, helmR * 1.15, 4), mat);
     noseGuard.rotateY(PI / 4);
-    noseGuard.position.set(0, helmCenterY - helmR * 0.32, helmR * 0.85);
+    noseGuard.position.set(0, helmCenterY - helmR * 0.32, helmR * 0.97);
     noseGuard.castShadow = true; noseGuard.receiveShadow = true;
     group.add(noseGuard);
     // cheek flaps: curved wrap-around plates (partial cylindrical shells, not flat boxes)
@@ -708,8 +987,11 @@ window.addFigureHelpers = function (THREE, mats, H) {
       var hnx = hx / hd, hny = hy / hd, hnz = hz / hd;
       for (var eyeSide = -1; eyeSide <= 1; eyeSide += 2) {
         var eyeDx = hnx - eyeSide * 0.30, eyeDy = hny - (-0.10);
-        var eyeFall = gaussFall(sqrt(eyeDx * eyeDx + eyeDy * eyeDy), 0.16) * Math.max(0, hnz - 0.4);
-        hd -= helmR * 0.22 * eyeFall;
+        // Deepened and widened (0.16/0.22 -> 0.20/0.34) so the eye holes read as
+        // dark, clearly separated recesses at typical viewing distance instead of
+        // disappearing into the helmet's overall dark silhouette.
+        var eyeFall = gaussFall(sqrt(eyeDx * eyeDx + eyeDy * eyeDy), 0.20) * Math.max(0, hnz - 0.4);
+        hd -= helmR * 0.34 * eyeFall;
       }
       helmArr[hv] = hnx * hd; helmArr[hv + 1] = hny * hd; helmArr[hv + 2] = hnz * hd;
     }
@@ -721,6 +1003,16 @@ window.addFigureHelpers = function (THREE, mats, H) {
       eyeRim.castShadow = true; eyeRim.receiveShadow = true;
       group.add(eyeRim);
     }
+    // brow band: a raised ridge running around the dome at eye level, standing
+    // slightly proud of the helmet shell. At render distance this is what makes
+    // the whole helmet read as a shaped object rather than a dark unbroken
+    // silhouette — it gives the sun a clean edge to catch a highlight along,
+    // separating the polished dome above from the darker brow/cheek zone below.
+    var browBand = new THREE.Mesh(new THREE.TorusGeometry(helmR * 0.99, helmR * 0.05, MOBILE ? 5 : 6, MOBILE ? 10 : 16), mat);
+    browBand.rotation.x = PI / 2;
+    browBand.position.y = helmCenterY - helmR * 0.06;
+    browBand.castShadow = true; browBand.receiveShadow = true;
+    group.add(browBand);
     // crest: a row of adjoining vertical slabs whose tops trace a smooth high arc
     // (nape to brow), reading as one continuous crest from any angle.
     var crestN = MOBILE ? 7 : 13, crestPeak = helmR * 1.55, crestLen = helmR * 2.5, crestBaseY = helmCenterY + helmR * 0.52;
@@ -738,8 +1030,8 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // Aegis: a carved dome (displaced lathe, snake-coil ridges radiating from the boss) across the
     // chest/shoulders, with a gorgoneion boss modelled from the same head-sculpting logic as makeHead.
     var aegisY = shoulderY - built.headSize * 0.2;
-    var aegisR = built.maxR * 1.35;
-    var aegisBulge = aegisR * 0.62;
+    var aegisR = built.maxR * 1.55;
+    var aegisBulge = aegisR * 0.7;
     var aegisProfile = [
       new THREE.Vector2(aegisR, 0),
       new THREE.Vector2(aegisR * 0.88, aegisBulge * 0.30),
@@ -754,7 +1046,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
     aegis.rotation.x = -PI / 2;
     aegis.scale.set(1, 1, 0.55);
     group.add(aegis);
-    var gorgon = makeHead(built.headSize * 0.42, { material: mat, hair: true, hairMaterial: mat });
+    var gorgon = makeHead(built.headSize * 0.42, { material: mat, hair: true, hairMaterial: mat, lowRes: true });
     gorgon.position.set(0, aegisY - built.headSize * 0.1, built.maxR * 0.92);
     group.add(gorgon);
 
@@ -775,7 +1067,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
     group.add(shieldRim);
     // shield boss: a carved gorgoneion (Medusa head), scaled and centred to dominate the shield
     // face rather than read as a small bump on it.
-    var shieldBoss = makeHead(shieldR * 0.44, { material: mat, hair: true, hairMaterial: mat });
+    var shieldBoss = makeHead(shieldR * 0.44, { material: mat, hair: true, hairMaterial: mat, lowRes: true });
     shieldBoss.rotation.y = 0.12;
     shieldBoss.position.set(shieldX + shieldR * 0.02, shieldY, shieldZ + shieldR * 0.20);
     group.add(shieldBoss);
@@ -785,7 +1077,9 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var leftHand = new THREE.Vector3(shieldX + shieldR * 0.1, shieldY + shieldR * 0.75, shieldZ);
     group.add(taperedLimb(leftShoulder, leftElbow, height * 0.032, height * 0.026, MOBILE ? 6 : 9, mat));
     group.add(taperedLimb(leftElbow, leftHand, height * 0.026, height * 0.021, MOBILE ? 6 : 9, mat));
-    group.add(ballMesh(height * 0.022, MOBILE ? 5 : 7, mat, leftHand));
+    group.add(jointBall(leftShoulder, height * 0.030, mat));
+    group.add(jointBall(leftElbow, height * 0.024, mat));
+    group.add(ballMesh(height * 0.022, 5, mat, leftHand));
 
     // Spear: right hand raised, shaft ~11m tall with a gilded leaf-shaped tip
     var rightShoulder = new THREE.Vector3(built.maxR * 0.92, shoulderY, height * 0.015);
@@ -793,7 +1087,9 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var rightHand = new THREE.Vector3(built.maxR * 1.0, shoulderY + height * 0.02, height * 0.04);
     group.add(taperedLimb(rightShoulder, rightElbow, height * 0.032, height * 0.026, MOBILE ? 6 : 9, mat));
     group.add(taperedLimb(rightElbow, rightHand, height * 0.026, height * 0.022, MOBILE ? 6 : 9, mat));
-    group.add(ballMesh(height * 0.022, MOBILE ? 5 : 7, mat, rightHand));
+    group.add(jointBall(rightShoulder, height * 0.030, mat));
+    group.add(jointBall(rightElbow, height * 0.024, mat));
+    group.add(ballMesh(height * 0.022, 5, mat, rightHand));
 
     var spearLen = 11;
     var spearBottomY = plinthH + 0.05;
