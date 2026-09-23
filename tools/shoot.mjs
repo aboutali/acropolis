@@ -30,14 +30,14 @@ for (const [label, vp] of [['desk', { width: 1280, height: 800 }], ['phone', { w
   page.on('console', m => { if (m.type() === 'error') console.log(`[${label}] console: ${m.text()}`); });
   page.on('pageerror', e => console.log(`[${label}] pageerror: ${e.message}`));
   for (const v of views) {
-    await page.goto(`file://${ROOT}/index.html?view=${custom ? 'overview' : v}&still&debug`);
+    await page.goto(`file://${ROOT}/index.html?view=${custom ? 'overview' : v}&still&debug`, { timeout: 180000 });
     if (custom) {
       await page.waitForTimeout(2500);
       await page.evaluate(c => window.acropolisCtrl.jumpTo(c), custom);
     }
     await page.waitForTimeout(6000);
     const file = path.join(OUT, `${v}-${label}.png`);
-    await page.screenshot({ path: file });
+    await page.screenshot({ path: file, timeout: 180000 });
     console.log(file, await page.textContent('#debug'));
   }
   await page.close();
