@@ -35,6 +35,14 @@ window.addFigureHelpers = function (THREE, mats, H) {
   }
   if (matBronzeFig && matBronzeFig.clone) {
     matBronzeFig = matBronzeFig.clone();
+    // Director's r1 review: the previous weights (0.38 desaturate + 0.30 toward
+    // a single hue) crushed the statue into a uniform dark silhouette — the
+    // drapery folds, aegis and body form were still there in the geometry but
+    // the material was hiding them. Cut both mix weights roughly in half and
+    // brighten the result ~25% so the underlying shading (which does carry the
+    // shape) reads through, while still smoothing the verdigris texture's
+    // patches from small-fitting-scale noise into something coherent at 9m.
+    if (typeof matBronzeFig.roughness === 'number') matBronzeFig.roughness = Math.min(matBronzeFig.roughness, 0.62);
     matBronzeFig.onBeforeCompile = function (shader) {
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <map_fragment>',
@@ -42,12 +50,14 @@ window.addFigureHelpers = function (THREE, mats, H) {
           '#include <map_fragment>',
           '  // The verdigris crust texture was tuned for small bronze fittings; at the',
           '  // Promachos\'s 9m scale its patches read as bright, saturated, disconnected',
-          '  // splotches rather than a coherent weathered coloration. Desaturating and',
-          '  // pulling the sampled colour toward one uniform muted verdigris hue blends',
-          '  // the patches into smooth gradients instead of hard-edged digital noise.',
+          '  // splotches rather than a coherent weathered coloration. A lighter touch',
+          '  // here (vs. the original full desaturate+hue-lock) blends the patches',
+          '  // toward a coherent verdigris while leaving enough colour/value variation',
+          '  // for the sculpted drapery, aegis and helmet to still read as shapes.',
           '  float figLuma = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );',
-          '  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( figLuma ), 0.38 );',
-          '  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.30, 0.40, 0.34 ), 0.30 );'
+          '  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( figLuma ), 0.18 );',
+          '  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.32, 0.42, 0.36 ), 0.15 );',
+          '  diffuseColor.rgb *= 1.25;'
         ].join('\n')
       );
     };
@@ -196,7 +206,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // segments (a handful of extra triangles per head) so the carved sockets and
     // mouth groove below have enough vertex density to actually show up.
     var lowRes = !!opts.lowRes || MOBILE;
-    var seg = lowRes ? 10 : 13;
+    var seg = lowRes ? 12 : 15;
     var geo = new THREE.SphereGeometry(size, seg, Math.max(6, seg - 4));
     var pos = geo.getAttribute('position');
     var arr = pos.array;
@@ -211,15 +221,18 @@ window.addFigureHelpers = function (THREE, mats, H) {
       // nose bridge — a real ancient marble face reads by its shadowed sockets
       // as much as by any raised feature, and without this a head is just a
       // smooth ovoid no matter how good the nose/chin are.
-      var eyeY = ny + 0.02, eyeFallL = gaussFall(nx + 0.13, 0.09) * gaussFall(eyeY, 0.10) * front;
-      var eyeFallR = gaussFall(nx - 0.13, 0.09) * gaussFall(eyeY, 0.10) * front;
-      push -= 0.055 * size * (eyeFallL + eyeFallR);
+      // Director's r1 review: eye sockets/mouth groove existed but were too
+      // shallow to survive the low-res LOD sphere's vertex spacing — deepened
+      // and widened both so the displacement actually clears the facet size.
+      var eyeY = ny + 0.02, eyeFallL = gaussFall(nx + 0.13, 0.11) * gaussFall(eyeY, 0.12) * front;
+      var eyeFallR = gaussFall(nx - 0.13, 0.11) * gaussFall(eyeY, 0.12) * front;
+      push -= 0.085 * size * (eyeFallL + eyeFallR);
       push += 0.34 * size * gaussFall(ny + 0.02, 0.20) * gaussFall(nx, 0.16) * Math.max(0, (nz - 0.5)); // nose
       // lips: a shallow horizontal groove (philtrum/mouth line) plus a touch of
       // lower-lip volume between the nose and the chin, giving the lower face a
       // visible feature instead of blank curvature.
-      push -= 0.045 * size * gaussFall(ny + 0.30, 0.045) * gaussFall(nx, 0.20) * front;
-      push += 0.031 * size * gaussFall(ny + 0.34, 0.05) * gaussFall(nx, 0.17) * front;
+      push -= 0.07 * size * gaussFall(ny + 0.32, 0.09) * gaussFall(nx, 0.20) * front;
+      push += 0.04 * size * gaussFall(ny + 0.34, 0.05) * gaussFall(nx, 0.17) * front;
       push += 0.13 * size * gaussFall(ny + 0.44, 0.16) * front;               // chin
       var jawPull = (ny < -0.05 && ny > -0.55) ? 0.055 * size * gaussFall(ny + 0.26, 0.24) * Math.max(0, abs(nx) - 0.28) : 0;
       var r = d + push - jawPull;
@@ -359,7 +372,13 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var limbSeg = LOD ? 6 : 9;
     var footSeg = LOD ? 6 : 8;
     var neckSeg = LOD ? 6 : 8;
-    var bodyRadial = LOD ? 12 : 20;
+    // Director's r1 review: pediment drapery read as smooth despite the fold
+    // code because LOD figures (nearly all pediment statues, height < 3.2)
+    // were capped at 12 radial facets on desktop — a fold pattern needs enough
+    // facets to actually show a ridge/valley rather than average it away.
+    // Desktop LOD now gets 16 (mobile keeps 12, the original cheap path);
+    // full-res figures go 20 -> 24.
+    var bodyRadial = LOD ? (MOBILE ? 12 : 16) : 24;
     var foldScale = opts.foldScale !== undefined ? opts.foldScale : 1;
     var leanScale = opts.leanScale !== undefined ? opts.leanScale : 1;
     // Classical 7.5-head canon (measured from the ground, y=0 at the feet): ankle ~0.5 head
@@ -398,7 +417,9 @@ window.addFigureHelpers = function (THREE, mats, H) {
     ];
     var body = foldedLathe(profile, {
       material: mat, seed: seed, span: neckBaseY, lean: lean, radial: bodyRadial,
-      vFoldCount: 16, vFold: 0.15 * foldScale, catAmp: 0.07 * foldScale, catFreq: 2.2,
+      // Director's r1 review: fold amplitude/count were too shallow/sparse to
+      // read as drapery at all (0.15 depth, 16 ridges) — deepened and densified.
+      vFoldCount: 20, vFold: 0.23 * foldScale, catAmp: 0.09 * foldScale, catFreq: 2.2,
       vFoldBiasTheta: weightSide > 0 ? PI * 0.15 : PI * 1.15, vFoldBiasAmt: 0.5
     });
     group.add(body);
@@ -641,8 +662,13 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // alternate which leg bears the weight, mirroring the real porch's arrangement
     var supportSide = (callIdx % 2 === 0) ? 1 : -1;
 
-    // ~1.3x the base radii: broad shoulders, full hips, a genuinely sturdy silhouette.
-    var rBase = 0.188, rCalf = 0.176, rKnee = 0.188, rHip = 0.228, rWaist = 0.195, rChest = 0.221, rShoulder = 0.195, rNeck = 0.090;
+    // Director's r1 review: shoulders (0.195) were still narrower than the hips
+    // (0.228), so despite the earlier 1.3x girth bump the silhouette read as
+    // bottom-heavy/peg-like rather than a sturdy, broad-shouldered kore built
+    // to visually carry an entablature. Widened the shoulder/chest, kept the
+    // waist relatively slim so it still nips in above the hip for a readable
+    // torso shape instead of a uniform tube.
+    var rBase = 0.188, rCalf = 0.176, rKnee = 0.188, rHip = 0.228, rWaist = 0.185, rChest = 0.236, rShoulder = 0.238, rNeck = 0.096;
     var profile = [
       new THREE.Vector2(rBase, plinthH),
       new THREE.Vector2(rCalf, 0.14 * height),
@@ -655,10 +681,12 @@ window.addFigureHelpers = function (THREE, mats, H) {
       new THREE.Vector2(rNeck, neckBaseY)
     ];
     var body = foldedLathe(profile, {
-      material: mat, seed: seed, span: neckBaseY, radial: MOBILE ? 12 : 22,
-      // deeper, more sculptural peplos folds than the base figure body
-      vFold: 0.24, vFoldCount: 17, vFoldBiasTheta: supportSide > 0 ? 0 : PI, vFoldBiasAmt: 0.8,
-      catAmp: 0.10, catFreq: 3,
+      material: mat, seed: seed, span: neckBaseY, radial: MOBILE ? 12 : 24,
+      // Director's r1 review: peplos still read smooth — deepened the fold
+      // amplitude/count and the catenary swag further for heavy, sculptural
+      // vertical folds (real korai drapery is thick wool, not a thin sheet).
+      vFold: 0.30, vFoldCount: 21, vFoldBiasTheta: supportSide > 0 ? 0 : PI, vFoldBiasAmt: 0.8,
+      catAmp: 0.13, catFreq: 3,
       // the free leg's bent knee presses through the drapery as a localized bulge, and a seam
       // running knee-to-ankle where the fabric is drawn tight over the shin — this is what
       // differentiates the free leg's drape from the straight support leg's vertical folds.
@@ -697,11 +725,16 @@ window.addFigureHelpers = function (THREE, mats, H) {
     headGroup.rotation.y = supportSide * 0.10 + (rnd() - 0.5) * 0.14;
     group.add(headGroup);
 
-    // long, thick braids down the back (front faces -z, so the back is +z)
-    var braidTop = new THREE.Vector3(0, headY + headSize * 0.3, headSize * 0.85);
+    // long, thick braids down the back (front faces -z, so the back is +z).
+    // Director's r1 review: braids were invisible — too thin (0.32/0.075 head
+    // radii) and starting right at the head/capital seam where the echinus
+    // overhangs and shadows them. Thickened the braid and started it a touch
+    // lower, clear of the capital's underside, so it reads as a real coiled
+    // mass against the back rather than disappearing into the join.
+    var braidTop = new THREE.Vector3(0, headY + headSize * 0.05, headSize * 0.90);
     for (var bi = -1; bi <= 1; bi += 2) {
-      var top = braidTop.clone(); top.x = bi * headSize * 0.35;
-      var braid = buildBraid(top, new THREE.Vector3(0, -1, 0.05), shoulderY - headY + headSize, headSize * 0.32, headSize * 0.075, MOBILE ? 7 : 12, seed + bi, mat);
+      var top = braidTop.clone(); top.x = bi * headSize * 0.38;
+      var braid = buildBraid(top, new THREE.Vector3(0, -1, 0.05), shoulderY - headY + headSize * 1.3, headSize * 0.40, headSize * 0.11, MOBILE ? 8 : 15, seed + bi, mat);
       group.add(braid);
     }
 
@@ -769,7 +802,10 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var geoms = [];
     var legR = fh * 0.09, torsoW = fh * 0.22, torsoH = fh * 0.40, headS = fh * 0.16;
     var stance = (rnd() - 0.5) * fh * 0.18;
-    var armSwing = (rnd() - 0.5) * fh * 0.3;
+    // Director's r1 review: metope/frieze figures read as generic and static —
+    // widened the swing range so limbs spread further from a neutral pose,
+    // giving combat pairs and marchers alike more dynamic, varied silhouettes.
+    var armSwing = (rnd() - 0.5) * fh * 0.6;
     var dz = Math.min(depth, fh * 0.5);
 
     function pushBox(w, h, d, x, y, z, rz) {
@@ -784,9 +820,17 @@ window.addFigureHelpers = function (THREE, mats, H) {
       // reads clearly as a centaur in silhouette without a full quadruped rig.
       var bodyLen = fh * 0.62, bodyH = fh * 0.30;
       pushBox(bodyLen, bodyH, depth * 0.9, cx + fh * 0.05, baseY + bodyH * 0.55, 0, 0);
+      // Foreleg/hindleg distinction (director's r1 review: all four legs read
+      // identically): the forelegs (nearer the human torso, lg 2-3) rear up —
+      // raised higher, bent at a steeper angle, as a centaur lunging into a
+      // fight would — while the hindlegs (lg 0-1) stay planted and vertical.
+      // Same box count/cost, just reposed.
       for (var lg = 0; lg < 4; lg++) {
         var lx = cx - bodyLen * 0.32 + lg * (bodyLen * 0.6 / 3);
-        pushBox(legR * 0.75, fh * 0.36, legR * 0.75, lx, baseY + fh * 0.19, 0, (lg < 2 ? -1 : 1) * 0.05);
+        var isFore = lg >= 2;
+        var legRot = isFore ? (lg < 3 ? -0.55 : 0.45) : (lg < 1 ? -0.05 : 0.05);
+        var legY = baseY + fh * (isFore ? 0.24 : 0.19);
+        pushBox(legR * 0.75, fh * (isFore ? 0.40 : 0.36), legR * 0.75, lx, legY, isFore ? dz * 0.12 : 0, legRot);
       }
       var htx = cx + bodyLen * 0.30;
       pushBox(torsoW * 0.9, torsoH, depth * 0.85, htx, baseY + bodyH + torsoH * 0.5, dz * 0.1, 0.08);
@@ -804,11 +848,22 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // arms — a Lapith gets one arm raised overhead with a weapon; everyone else swings both
     var armLen = fh * 0.36;
     var raised = variant === 'lapith';
-    pushBox(legR * 0.75, armLen, legR * 0.75, cx - torsoW * 0.55 + armSwing * 0.3, baseY + fh * 0.62, dz * 0.1, 0.5 + armSwing * 0.01);
+    // off-hand: a Lapith's non-weapon arm grips a shield braced in front of the
+    // body rather than just swinging free — its hand pose bends toward the
+    // shield face instead of hanging straight down.
+    var offArmX = cx - torsoW * 0.55 + armSwing * 0.3;
+    var offArmRot = raised ? 0.85 : (0.5 + armSwing * 0.01);
+    pushBox(legR * 0.75, armLen, legR * 0.75, offArmX, baseY + fh * (raised ? 0.55 : 0.62), dz * 0.1, offArmRot);
     pushBox(legR * 0.75, armLen, legR * 0.75, cx + torsoW * 0.55 - armSwing * 0.3, baseY + fh * (raised ? 0.74 : 0.62), dz * 0.1, raised ? -1.15 : (-0.5 - armSwing * 0.01));
     if (raised) {
       // weapon: a thin diagonal bar gripped in the raised hand
       pushBox(legR * 0.35, fh * 0.34, legR * 0.35, cx + torsoW * 0.85, baseY + fh * 0.92, dz * 0.15, -0.3);
+      // shield: a round hoplite shield (approximated as a flattened disc-like
+      // box, cheap and readable at metope scale) braced on the off arm,
+      // covering the torso's near side — without it a Lapith is just a bare
+      // fighter with a stick, not a readable combat scene.
+      var shieldR = fh * 0.30;
+      pushBox(shieldR * 2, shieldR * 2, depth * 0.55, offArmX - legR * 0.4, baseY + fh * 0.46, dz * 0.05, 0);
     }
     // head
     pushBox(headS, headS, Math.min(headS, depth), cx, baseY + fh * 0.42 + torsoH + headS * 0.5, dz * 0.15, 0);
@@ -889,7 +944,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // dark blob rather than a clean silhouette. foldScale/leanScale exaggerate the
     // peplos folds and the contrapposto lean so the bronze reads as a shaped figure
     // — not flat color — even under the patina's dark, uneven material.
-    var built = buildStandingBody(height, mat, seed, { weightSide: 1, sash: true, arms: false, foldScale: 1.8, leanScale: 1.3, headTurn: 0 });
+    var built = buildStandingBody(height, mat, seed, { weightSide: 1, sash: true, arms: false, foldScale: 2.1, leanScale: 1.3, headTurn: 0 });
     var statue = built.group;
     statue.position.y = plinthH;
     group.add(statue);
