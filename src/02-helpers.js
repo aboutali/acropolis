@@ -125,7 +125,15 @@ window.makeHelpers = function (THREE, mats) {
           nt = (yN - shaftFrac) / neckFrac;
           neckFac = 0.965 - 0.02 * Math.exp(-Math.pow((nt - 0.5) * 7, 2)); // incised necking groove
         }
-        newR = r * taper * ent * neckFac;
+        // Foot flare (apophyge): a real Doric column has no separate base
+        // blocks, but the shaft does curve outward right where it meets the
+        // stylobate. The art director found columns transitioning straight
+        // from shaft to floor with no molded base — this reads a deliberate
+        // curved flare into that last ~5% of shaft height, at zero extra
+        // triangles (same vertex loop, no new geometry).
+        var footFrac = 0.05;
+        var footFac = yN <= footFrac ? 1 + 0.07 * (1 - yN / footFrac) * (1 - yN / footFrac) : 1;
+        newR = r * taper * ent * neckFac * footFac;
         arr[i] = newR * cos(theta);
         arr[i + 2] = newR * sin(theta);
       }
@@ -172,14 +180,21 @@ window.makeHelpers = function (THREE, mats) {
     var abacusGeo = new THREE.BoxGeometry(topD * 1.32, abacusH, topD * 1.32);
     var annuletGeo = new THREE.CylinderGeometry(neckR * 1.045, neckR * 1.045, height * 0.006, Math.min(radial, MOBILE ? 12 : 16));
     var jointGeo = new THREE.CylinderGeometry(1, 1, height * 0.0035, Math.min(radial, MOBILE ? 10 : 14)); // unit radius, scaled per joint
+    // Thin foot fillet ring where the shaft meets the stylobate: paired with
+    // the vertex-level foot-flare above, this gives the column base a
+    // visible molded collar (same cheap thin-cylinder technique as the
+    // annulet at the neck) instead of the shaft just stopping flat.
+    var footRingGeo = new THREE.CylinderGeometry(baseD / 2 * 1.055, baseD / 2 * 1.07, height * 0.01, Math.min(radial, MOBILE ? 12 : 16));
 
     var annuletBand = height * 0.02;
+    var footRingT = [];
     for (i = 0; i < positions.length; i++) {
       var cx = positions[i][0], cz = positions[i][1];
       shaftT.push({ p: [cx, y + shaftH / 2, cz] });
       echinusT.push({ p: [cx, y + shaftH, cz] });
       abacusT.push({ p: [cx, y + shaftH + echinusH + abacusH / 2, cz] });
       annuletT.push({ p: [cx, y + shaftH - annuletBand * 0.4, cz] });
+      footRingT.push({ p: [cx, y + height * 0.005, cz] });
       var fluteTop = shaftH * shaftFrac;
       for (var j = 1; j < drums; j++) {
         var jy = j / drums * fluteTop;
@@ -192,6 +207,7 @@ window.makeHelpers = function (THREE, mats) {
     group.add(H.instance(abacusGeo, mats.marbleWorn, abacusT));
     group.add(H.instance(annuletGeo, mats.marbleShadowed, annuletT));
     group.add(H.instance(jointGeo, mats.marbleShadowed, jointT));
+    group.add(H.instance(footRingGeo, mats.marbleShadowed, footRingT));
     return group;
   };
 
@@ -211,13 +227,34 @@ window.makeHelpers = function (THREE, mats) {
 
     var radial = Math.max(flutes * 2, Math.min(MOBILE ? 26 : 40, flutes * 2));
     var heightSeg = MOBILE ? 3 : 4;
-    var baseH = height * 0.045;
+    var baseH = height * 0.06;
     var shaftH = height * 0.80;
     var bandH = height * 0.05;
     var capH = height * 0.05;
     var abacusH = height * 0.032;
 
-    var baseGeo = new THREE.CylinderGeometry(baseD * 0.62, baseD * 0.68, baseH, MOBILE ? 12 : 16);
+    // Attic base (square plinth + torus/scotia/torus profile), replacing the
+    // old single tapered cylinder: the art director found columns jumping
+    // straight from shaft to stylobate with no articulated base. The
+    // torus-scotia-torus curve is one LatheGeometry revolution (same
+    // technique as the Doric echinus above) so the extra detail costs only
+    // a handful of extra segments, not extra meshes. Top radius matches the
+    // shaft's own foot radius (baseD*0.6) so the shaft sits flush on it.
+    var plinthH = baseH * 0.34;
+    var curveH = baseH - plinthH;
+    var t1H = curveH * 0.42, scH = curveH * 0.22, t2H = curveH - t1H - scH;
+    var footR = baseD * 0.6;
+    var baseLathePts = [
+      new THREE.Vector2(Math.max(0.02, baseD * 0.50), 0),
+      new THREE.Vector2(baseD * 0.62, t1H * 0.55),
+      new THREE.Vector2(baseD * 0.54, t1H),
+      new THREE.Vector2(baseD * 0.46, t1H + scH * 0.5),
+      new THREE.Vector2(baseD * 0.52, t1H + scH),
+      new THREE.Vector2(footR, t1H + scH + t2H * 0.6),
+      new THREE.Vector2(footR, curveH)
+    ];
+    var baseCurveGeo = new THREE.LatheGeometry(baseLathePts, MOBILE ? 10 : 14);
+    var plinthGeo = new THREE.BoxGeometry(baseD * 1.3, plinthH, baseD * 1.3);
     var shaftGeo = new THREE.CylinderGeometry(topD / 2, baseD * 0.6, shaftH, radial, heightSeg);
     var pos = shaftGeo.getAttribute('position'); var arr = pos.array;
     var i, px, py, pz, theta, r, yN, ent, newR;
@@ -254,10 +291,11 @@ window.makeHelpers = function (THREE, mats) {
     var voluteEyeGeo = new THREE.SphereGeometry(topD * 0.05, MOBILE ? 5 : 5, MOBILE ? 4 : 4);
     var abacusGeo = new THREE.BoxGeometry(topD * 1.55, abacusH, topD * 1.12);
 
-    var baseT = [], shaftT = [], bandT = [], eggT = [], dartT = [], voluteT = [], voluteInnerT = [], voluteEyeT = [], abacusT = [];
+    var plinthT = [], curveT = [], shaftT = [], bandT = [], eggT = [], dartT = [], voluteT = [], voluteInnerT = [], voluteEyeT = [], abacusT = [];
     for (i = 0; i < positions.length; i++) {
       var cx = positions[i][0], cz = positions[i][1];
-      baseT.push({ p: [cx, y + baseH / 2, cz] });
+      plinthT.push({ p: [cx, y + plinthH / 2, cz] });
+      curveT.push({ p: [cx, y + plinthH, cz] });
       shaftT.push({ p: [cx, y + baseH + shaftH / 2, cz] });
       var capY = y + baseH + shaftH;
       bandT.push({ p: [cx, capY + bandH / 2, cz] });
@@ -279,7 +317,8 @@ window.makeHelpers = function (THREE, mats) {
       voluteEyeT.push({ p: [cx + vOff2[0], capY + bandH + capH * 0.5, cz + vOff2[1]] });
       abacusT.push({ p: [cx, capY + bandH + capH + abacusH / 2, cz], r: [0, rotY, 0] });
     }
-    group.add(H.instance(baseGeo, mats.marbleWorn, baseT));
+    group.add(H.instance(plinthGeo, mats.marbleWorn, plinthT));
+    group.add(H.instance(baseCurveGeo, mats.marbleWorn, curveT));
     group.add(H.instance(shaftGeo, mats.marbleWorn, shaftT));
     group.add(H.instance(bandGeo, mats.marbleShadowed, bandT));
     group.add(H.instance(eggGeo, mats.marble, eggT));
@@ -528,10 +567,13 @@ window.makeHelpers = function (THREE, mats) {
           var facing2 = [sin(g2.r[1]) * (0.62 / 2 + 0.02), -cos(g2.r[1]) * (0.62 / 2 + 0.02)];
           var soffitY = archH + friezeH + corniceH * 0.55;
           mutuleT.push({ p: [g2.p[0] + facing2[0], soffitY, g2.p[2] + facing2[1]], r: [0, g2.r[1], 0] });
-          // A 2x2 corner grid (not 3x3): still reads as a mutule's gutta
-          // cluster at normal viewing distance, well under half the cost.
-          for (var mgx = -1; mgx <= 1; mgx += 2) for (var mgz = -1; mgz <= 1; mgz += 2) {
-            var lo = rotXZ(mgx * 0.32, mgz * 0.18, g2.r[1]);
+          // A 3x2 grid (6 guttae, not the old 2x2 corner-only 4): the art
+          // director flagged the soffit as reading visibly sparse next to a
+          // real mutule's 3x3=9 drops. 6 is the cheapest step up that still
+          // reads as a full row rather than just corner studs, at 1.5x the
+          // old instance cost (still a single low-poly cone-cylinder each).
+          for (var mgxi = -1; mgxi <= 1; mgxi++) for (var mgz = -1; mgz <= 1; mgz += 2) {
+            var lo = rotXZ(mgxi * 0.32, mgz * 0.18, g2.r[1]);
             mutGuttaT.push({ p: [g2.p[0] + facing2[0] + lo[0], soffitY - 0.05, g2.p[2] + facing2[1] + lo[1]], r: [PI, 0, 0] });
           }
         }
@@ -678,12 +720,35 @@ window.makeHelpers = function (THREE, mats) {
     var acroteria = o.acroteria !== undefined ? o.acroteria : false;
     var group = new THREE.Group();
     var ridgeH = (w / 2) * pitch;
-    var slopeLen = sqrt((w / 2) * (w / 2) + ridgeH * ridgeH);
     var angle = atan2(pitch, 1);
+    // Real ancient roofs project the tile courses well past the cornice
+    // face for drainage — the previous pass had the eave landing almost
+    // exactly on the entablature edge (near-zero overhang, visible as a flat
+    // roofline flush with the colonnade below in parthenon/erechtheion
+    // shots). Extend the SAME slope past the original eave point by a
+    // horizontal `ovhg`, computed from this call's own w so every building
+    // gets a proportional overhang without callers needing to change their
+    // w argument. The ridge position/pitch are untouched (only the eave end
+    // of each slab moves outward and slightly down along the unchanged
+    // slope line), so this cannot reopen the old tile-overshoot bug: tile/
+    // cover rows below are still sized as a strict fraction of the (now
+    // longer) slab length, never derived independently.
+    var ovhg = Math.max(0.4, Math.min(1.0, w * 0.02));
+    var slopeLenBase = sqrt((w / 2) * (w / 2) + ridgeH * ridgeH);
+    var ovhgSlope = ovhg / cos(angle);
+    var slopeLen = slopeLenBase + ovhgSlope;
+    var halfLen = slopeLen / 2;
+    var eaveHalfW = w / 2 + ovhg;   // extended eave line, x = ±eaveHalfW
+    var eaveY = -ovhg * pitch;      // eave tip droops slightly below y=0
 
-    // Two roof slabs (structural underlayment beneath the tile courses).
+    // Two roof slabs (structural underlayment beneath the tile courses),
+    // pinned at the ridge (0, ridgeH) and running the full extended length
+    // to the new eave point (±eaveHalfW, eaveY) along the same slope angle.
     var slab = [new THREE.BoxGeometry(slopeLen, 0.2, d), new THREE.BoxGeometry(slopeLen, 0.2, d)];
-    var slabPos = [[w / 4, ridgeH / 2, 0], [-w / 4, ridgeH / 2, 0]];
+    var slabPos = [
+      [halfLen * cos(angle), ridgeH - halfLen * sin(angle), 0],
+      [-halfLen * cos(angle), ridgeH - halfLen * sin(angle), 0]
+    ];
     var slabRot = [[0, 0, -angle], [0, 0, angle]];
     for (var i = 0; i < 2; i++) {
       var slabMesh = addMesh(group, slab[i], mats.terracotta, slabPos[i], slabRot[i]);
@@ -782,13 +847,13 @@ window.makeHelpers = function (THREE, mats) {
             s: [slopeLen * 0.97, rowW * 0.16, rowW * 0.16]
           });
         }
-        // Antefixes along the true eave line (x = sx*w/2, y = 0), one per
-        // row, spread along the full depth — the eave itself, not the rake.
+        // Antefixes along the true (now overhanging) eave line, one per row,
+        // spread along the full depth — the eave itself, not the rake.
         for (var ai = 0; ai < rows; ai += (MOBILE ? 2 : 1)) {
           var az = -d / 2 + (ai + 0.5) * rowW;
           var ry = side === 0 ? 0 : PI;
-          antefixT.push({ p: [sx * (w / 2 + 0.02), 0.15, az], r: [0, ry, 0], s: [1, 1, rowW * 0.6] });
-          antefixCapT.push({ p: [sx * (w / 2 + 0.05), 0.15, az], r: [0, ry + PI / 2, 0], s: [0.3, 0.28, 0.3] });
+          antefixT.push({ p: [sx * (eaveHalfW + 0.02), eaveY + 0.15, az], r: [0, ry, 0], s: [1, 1, rowW * 0.6] });
+          antefixCapT.push({ p: [sx * (eaveHalfW + 0.05), eaveY + 0.15, az], r: [0, ry + PI / 2, 0], s: [0.3, 0.28, 0.3] });
         }
       }
       // Roof tiles skip shadow-casting: this many small, thin, tightly
@@ -834,7 +899,7 @@ window.makeHelpers = function (THREE, mats) {
     // Acroteria: taller floral finials at the apex and the two eave corners.
     if (acroteria) {
       var acroBaseGeo = new THREE.CylinderGeometry(0.22, 0.3, 0.16, 8);
-      var acroPos = [[0, ridgeH, d / 2], [0, ridgeH, -d / 2], [w / 2, 0, d / 2], [-w / 2, 0, d / 2], [w / 2, 0, -d / 2], [-w / 2, 0, -d / 2]];
+      var acroPos = [[0, ridgeH, d / 2], [0, ridgeH, -d / 2], [eaveHalfW, eaveY, d / 2], [-eaveHalfW, eaveY, d / 2], [eaveHalfW, eaveY, -d / 2], [-eaveHalfW, eaveY, -d / 2]];
       var acroT = [], acroBaseT = [];
       for (var a = 0; a < acroPos.length; a++) {
         var apY = acroPos[a][1] + 0.14;
@@ -970,12 +1035,15 @@ window.makeHelpers = function (THREE, mats) {
     courseH = h / courses;
     var blockLen = MOBILE ? 1.9 : 1.7;
     // Real ashlar is laid flush: courses run true and block faces sit in one
-    // plane, with only a fine (~1 cm) dark joint groove between them — not a
-    // wide gap with big in/out steps. Both gaps and the protrusion jitter
-    // below are sized to that: a joint you can see as a hairline, not a
-    // masonry course that reads as a staircase.
-    var jointGapV = 0.012; // vertical joint between adjacent blocks in a course
-    var jointGapH = 0.015; // bed joint between courses
+    // plane, with only a fine dark joint groove between them — not a wide
+    // gap with big in/out steps. The art director found the previous, even
+    // finer (~1cm) gap read as barely-there against a light backing; widened
+    // a bit and paired with a genuinely dark backing material (below) so the
+    // joint stays a hairline in scale terms but is legible as a dark line
+    // from normal viewing distance, not a masonry course that reads as a
+    // staircase.
+    var jointGapV = 0.022; // vertical joint between adjacent blocks in a course
+    var jointGapH = 0.026; // bed joint between courses
 
     // Hand-dressed opus quadratum, not CNC ashlar: every course is a slightly
     // different natural height (renormalised so the wall still tops out at
@@ -993,7 +1061,7 @@ window.makeHelpers = function (THREE, mats) {
       courseY0.push(courseY0[ci] + courseHeights[ci]);
     }
 
-    var blockWornT = [], blockShadowedT = [], blockCleanT = [];
+    var blockWornT = [], blockShadowedT = [], blockCleanT = [], blockStainedT = [];
     // Runs a coursed wall segment centred at (cx,cz) of total length `len`
     // along local axis (dx,dz unit vector), `courses` high, from y=0.
     function wallRun(cx, cz, len, dx, dz, thick) {
@@ -1015,17 +1083,28 @@ window.makeHelpers = function (THREE, mats) {
           var px = cx + dx * along + nx * proud, pz = cz + dz * along + nz * proud;
           var t = { p: [px, cyBase + lift, pz], r: [0, ang, 0], s: [(bl - jg) / bl, (courseHeights[c] - jointGapH) / courseH, 1] };
           // Weathering reads as broad vertical iron-stain streaks (low-frequency
-          // noise along the wall) plus more grime low down near grade, not an
-          // independent per-block coin flip — that just looks like static.
+          // noise along the wall) plus more grime low down near grade, plus a
+          // finer per-block patch noise (a second, higher-frequency field
+          // sampled per-block rather than per-run) so neighbouring blocks in
+          // the same streak still land in different tint buckets — real
+          // 2400-year-old Pentelic ashlar shows every block individually
+          // discoloured, not just broad uniform bands. Four buckets (clean /
+          // lightly stained / worn / heavily shadowed) instead of three give
+          // one more visible step of variation without any new material.
           var streak = H.noise2(along * 0.09, heightFrac * 1.4, wallSeed); // -1..1
-          var grime = 0.42 + streak * 0.32 + (1 - heightFrac) * 0.14 + (rnd() - 0.5) * 0.1;
-          (grime < 0.3 ? blockCleanT : grime < 0.68 ? blockWornT : blockShadowedT).push(t);
+          var patch = H.noise2(along * 0.6 + c * 3.1, c * 0.37, wallSeed + 500); // -1..1, per-block scale
+          var grime = 0.42 + streak * 0.3 + patch * 0.16 + (1 - heightFrac) * 0.14 + (rnd() - 0.5) * 0.12;
+          var bucket = grime < 0.26 ? blockCleanT : grime < 0.5 ? blockStainedT : grime < 0.74 ? blockWornT : blockShadowedT;
+          bucket.push(t);
         }
       }
-      // Solid grout-dark backing behind the coursed veneer: without it, the
+      // Dark mortar/grout backing behind the coursed veneer: without it, the
       // hand-dressed gaps between blocks read as holes straight through to
-      // whatever is behind the wall instead of a mortared joint.
-      addMesh(group, new THREE.BoxGeometry(len + thick * 0.2, h, thick * 0.82), mats.marbleShadowed, [cx, h / 2, cz], [0, ang, 0]);
+      // whatever is behind the wall instead of a mortared joint. Switched
+      // from the (fairly light) marbleShadowed marble texture to the much
+      // darker rockDark material so the widened joint above reads as a
+      // legible dark line/shadow, not a barely-visible hairline.
+      addMesh(group, new THREE.BoxGeometry(len + thick * 0.2, h, thick * 0.82), mats.rockDark, [cx, h / 2, cz], [0, ang, 0]);
     }
 
     var halfW = w / 2, halfD = d / 2;
@@ -1054,6 +1133,12 @@ window.makeHelpers = function (THREE, mats) {
     if (blockWornT.length) group.add(H.instance(blockGeo, mats.marbleWorn, blockWornT));
     if (blockShadowedT.length) group.add(H.instance(blockGeo, mats.marbleShadowed, blockShadowedT));
     if (blockCleanT.length) group.add(H.instance(blockGeo, mats.marble, blockCleanT));
+    // Fourth tint step (between clean and fully worn): reuses the existing
+    // marbleRelief material as an extra stain bucket rather than
+    // constructing a new material — its own baked patina/streak field
+    // already differs from the other three, so it reads as a distinct,
+    // naturally-stained block colour, not a repeated texture tile.
+    if (blockStainedT.length) group.add(H.instance(blockGeo, mats.marbleRelief, blockStainedT));
 
     if (frame) {
       var dw = doorWidth, dh = h, ry = frameRy, center = frameCenter;
