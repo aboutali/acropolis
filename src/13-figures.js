@@ -4,6 +4,55 @@ window.addFigureHelpers = function (THREE, mats, H) {
   var MOBILE = !!(window.CFG && window.CFG.MOBILE);
   var UP = new THREE.Vector3(0, 1, 0);
 
+  // ---- local material refinements, used only by this module's own meshes ----
+  // mats.marbleStatue and mats.bronzePatina are consumed nowhere else in the
+  // scene (every other module uses marble/marbleWorn/marbleShadowed/bronze), so
+  // cloning them here and tuning the clones only affects figures — the shared
+  // objects in `mats` (and anything else that might reference them later) are
+  // left completely untouched.
+  var matMarbleFig = mats.marbleStatue;
+  var matBronzeFig = mats.bronzePatina;
+  if (matMarbleFig && matMarbleFig.clone) {
+    matMarbleFig = matMarbleFig.clone();
+    // Waxy, slightly warmer marble: real Pentelic marble carries a soft specular
+    // sheen and lets warm light bleed through thin edges (ears, fingers, drapery
+    // hems) rather than reading as a hard, opaque, uniformly matte plaster.
+    if (typeof matMarbleFig.roughness === 'number') matMarbleFig.roughness = Math.min(matMarbleFig.roughness, 0.86);
+    matMarbleFig.onBeforeCompile = function (shader) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        [
+          '  // fake subsurface scattering: a view-dependent (fresnel) warm rim so thin,',
+          '  // backlit edges pick up an orange/amber glow the way real marble does when',
+          '  // sunlight passes through a few centimetres of stone.',
+          '  vec3 figViewDir = normalize( vViewPosition );',
+          '  float figRim = pow( 1.0 - max( dot( normalize( normal ), figViewDir ), 0.0 ), 2.4 );',
+          '  gl_FragColor.rgb += figRim * vec3( 0.55, 0.30, 0.13 ) * 0.30;',
+          '#include <dithering_fragment>'
+        ].join('\n')
+      );
+    };
+  }
+  if (matBronzeFig && matBronzeFig.clone) {
+    matBronzeFig = matBronzeFig.clone();
+    matBronzeFig.onBeforeCompile = function (shader) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment>',
+        [
+          '#include <map_fragment>',
+          '  // The verdigris crust texture was tuned for small bronze fittings; at the',
+          '  // Promachos\'s 9m scale its patches read as bright, saturated, disconnected',
+          '  // splotches rather than a coherent weathered coloration. Desaturating and',
+          '  // pulling the sampled colour toward one uniform muted verdigris hue blends',
+          '  // the patches into smooth gradients instead of hard-edged digital noise.',
+          '  float figLuma = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );',
+          '  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( figLuma ), 0.38 );',
+          '  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.30, 0.40, 0.34 ), 0.30 );'
+        ].join('\n')
+      );
+    };
+  }
+
   // ---- seeded LCG (no built-in RNG allowed) ----
   function makeRng(seed) {
     var s = (seed >>> 0) || 1;
@@ -62,7 +111,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
   function foldedLathe(profile, opts) {
     opts = opts || {};
     var radial = opts.radial || (MOBILE ? 11 : 20);
-    var mat = opts.material || mats.marbleStatue;
+    var mat = opts.material || matMarbleFig;
     var vFold = opts.vFold !== undefined ? opts.vFold : 0.05;
     var vFoldCount = opts.vFoldCount || 9;
     var vFoldBiasTheta = opts.vFoldBiasTheta;
@@ -81,6 +130,11 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var rnd = makeRng(seed);
     var phase = rnd() * PI * 2;
     var microPhase = rnd() * PI * 2;
+    // organic-irregularity phases: deterministic per seed, used to break the fold
+    // pattern's otherwise-perfect angular/vertical regularity (real drapery folds
+    // vary in depth, width and crispness across a figure rather than repeating
+    // identically) without introducing any runtime randomness.
+    var irregPhaseA = rnd() * PI * 2, irregPhaseB = rnd() * PI * 2, irregPhaseC = rnd() * PI * 2;
 
     var geo = new THREE.LatheGeometry(profile, radial);
     var pos = geo.getAttribute('position');
@@ -91,8 +145,18 @@ window.addFigureHelpers = function (THREE, mats, H) {
       var r = sqrt(x * x + z * z);
       var yFrac = y / span;
       var bias = vFoldBiasTheta !== undefined ? (1 + vFoldBiasAmt * cos(theta - vFoldBiasTheta)) : 1;
-      var fold = 1 + vFold * bias * triWave(vFoldCount * theta + phase)
-        + catAmp * sin(catFreq * yFrac * PI * 2 + 2.6 * sin(theta + phase))
+      // low-frequency seeded modulation of fold amplitude (some folds read deep,
+      // others barely creased) and of local phase (fold spacing drifts up the
+      // body instead of staying perfectly evenly spaced).
+      var ampMod = 1 + 0.42 * sin(2.3 * theta + irregPhaseA) + 0.24 * sin(3.7 * yFrac * PI + irregPhaseB);
+      var phaseDrift = 0.30 * sin(1.6 * yFrac * PI + irregPhaseA) * cos(theta * 0.5 + irregPhaseC);
+      // blend a sharp "tent" crease with a soft sinusoid, the mix itself varying
+      // by angle/seed, so some ridges catch light as crisp creases and others as
+      // shallow, softly-shadowed undulations rather than every fold looking alike.
+      var crispness = 0.5 + 0.5 * sin(1.1 * theta + irregPhaseC);
+      var foldShape = crispness * triWave(vFoldCount * theta + phase + phaseDrift) + (1 - crispness) * sin(vFoldCount * theta + phase + phaseDrift);
+      var fold = 1 + vFold * bias * ampMod * foldShape
+        + catAmp * ampMod * sin(catFreq * yFrac * PI * 2 + 2.6 * sin(theta + phase))
         + micro * cos(microCount * theta + microPhase) * sin(3.1 * theta - microPhase * 0.5);
       var newR = r * fold;
       var nx = newR * cos(theta), nz = newR * sin(theta);
@@ -123,13 +187,17 @@ window.addFigureHelpers = function (THREE, mats, H) {
   // ---- head: displaced sphere (brow, nose, chin) + hair mass, on a neck ----
   function makeHead(size, opts) {
     opts = opts || {};
-    var mat = opts.material || mats.marbleStatue;
+    var mat = opts.material || matMarbleFig;
     var hairMat = opts.hairMaterial || mat;
     // lowRes: small/distant heads (most pediment figures, relief-scale decoration)
     // don't need full sphere resolution or a separate hair shell.
+    // lowRes heads (most pediment/caryatid figures) still need eyes/nose/lips to
+    // read as a face rather than a blank dome — bumped from 8 to 10 radial
+    // segments (a handful of extra triangles per head) so the carved sockets and
+    // mouth groove below have enough vertex density to actually show up.
     var lowRes = !!opts.lowRes || MOBILE;
-    var seg = lowRes ? 8 : 13;
-    var geo = new THREE.SphereGeometry(size, seg, Math.max(5, seg - 4));
+    var seg = lowRes ? 10 : 13;
+    var geo = new THREE.SphereGeometry(size, seg, Math.max(6, seg - 4));
     var pos = geo.getAttribute('position');
     var arr = pos.array;
     for (var i = 0; i < arr.length; i += 3) {
@@ -139,7 +207,19 @@ window.addFigureHelpers = function (THREE, mats, H) {
       var front = Math.max(0, nz);
       var push = 0;
       push += 0.09 * size * gaussFall(ny - 0.14, 0.16) * front;               // brow ridge
+      // eye sockets: paired carved recesses just under the brow, flanking the
+      // nose bridge — a real ancient marble face reads by its shadowed sockets
+      // as much as by any raised feature, and without this a head is just a
+      // smooth ovoid no matter how good the nose/chin are.
+      var eyeY = ny + 0.02, eyeFallL = gaussFall(nx + 0.13, 0.09) * gaussFall(eyeY, 0.10) * front;
+      var eyeFallR = gaussFall(nx - 0.13, 0.09) * gaussFall(eyeY, 0.10) * front;
+      push -= 0.055 * size * (eyeFallL + eyeFallR);
       push += 0.34 * size * gaussFall(ny + 0.02, 0.20) * gaussFall(nx, 0.16) * Math.max(0, (nz - 0.5)); // nose
+      // lips: a shallow horizontal groove (philtrum/mouth line) plus a touch of
+      // lower-lip volume between the nose and the chin, giving the lower face a
+      // visible feature instead of blank curvature.
+      push -= 0.045 * size * gaussFall(ny + 0.30, 0.045) * gaussFall(nx, 0.20) * front;
+      push += 0.031 * size * gaussFall(ny + 0.34, 0.05) * gaussFall(nx, 0.17) * front;
       push += 0.13 * size * gaussFall(ny + 0.44, 0.16) * front;               // chin
       var jawPull = (ny < -0.05 && ny > -0.55) ? 0.055 * size * gaussFall(ny + 0.26, 0.24) * Math.max(0, abs(nx) - 0.28) : 0;
       var r = d + push - jawPull;
@@ -202,6 +282,38 @@ window.addFigureHelpers = function (THREE, mats, H) {
   function jointBall(pos, r, mat) {
     // small feature regardless of viewing distance — always cheap
     return ballMesh(r, 5, mat, pos);
+  }
+
+  // ---- broken-limb stump: a rounded, irregular knob that fully covers the cut
+  // cylinder's flat end cap. Root cause of "sharp geometric snap" breaks: a plain
+  // jointBall sized as a fraction of the limb's *start* radius is smaller than
+  // the cylinder's actual cut cross-section at its far (elbow) end, so the flat
+  // circular cap peeks out past the ball — reading exactly like a clean saw-cut
+  // rather than 2500 years of erosion. This sizes the stump to fully envelop that
+  // cut face, and perturbs it with seeded low-frequency noise so it reads as a
+  // pitted, uneven lump instead of a perfect sphere. ----
+  function brokenStump(pos, cutRadius, seed, mat) {
+    var r = cutRadius * 1.25;
+    var geo = new THREE.SphereGeometry(r, MOBILE ? 6 : 7, MOBILE ? 5 : 6);
+    var pa = geo.getAttribute('position');
+    var arr = pa.array;
+    var rnd = makeRng(seed);
+    var ph1 = rnd() * PI * 2, ph2 = rnd() * PI * 2, ph3 = rnd() * PI * 2;
+    for (var i = 0; i < arr.length; i += 3) {
+      var x = arr[i], y = arr[i + 1], z = arr[i + 2];
+      var d = sqrt(x * x + y * y + z * z) || 1;
+      var nx = x / d, ny = y / d, nz = z / d;
+      var theta = atan2(nz, nx);
+      var bump = 1 + 0.16 * sin(4 * theta + ph1) * cos(3 * ny + ph2) + 0.10 * sin(7 * theta - ph3) * sin(5 * ny + ph1);
+      var nr = d * bump;
+      arr[i] = nx * nr; arr[i + 1] = ny * nr; arr[i + 2] = nz * nr;
+    }
+    pa.needsUpdate = true;
+    geo.computeVertexNormals();
+    var mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(pos);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    return mesh;
   }
 
   // ---- braid: a chain of slightly offset tapered segments down the back, each one twisted
@@ -316,7 +428,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
       group.add(taperedLimb(relShY, relEl, armR0, (armR0 + armR1) / 2, limbSeg, mat));
       group.add(jointBall(relShY, armR0 * 0.92, mat));
       if (breakArm === 'relaxed') {
-        group.add(jointBall(relEl, armR0 * 0.7, mat)); // rounded broken stump
+        group.add(brokenStump(relEl, (armR0 + armR1) / 2, seed + 401, mat)); // eroded broken stump
       } else {
         group.add(taperedLimb(relEl, relWr, (armR0 + armR1) / 2, armR1, limbSeg, mat));
         group.add(jointBall(relEl, (armR0 + armR1) / 2 * 0.95, mat));
@@ -330,7 +442,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
       group.add(taperedLimb(benShY, benEl, armR0, (armR0 + armR1) / 2, limbSeg, mat));
       group.add(jointBall(benShY, armR0 * 0.92, mat));
       if (breakArm === 'bent') {
-        group.add(jointBall(benEl, armR0 * 0.7, mat));
+        group.add(brokenStump(benEl, (armR0 + armR1) / 2, seed + 402, mat));
       } else {
         group.add(taperedLimb(benEl, benWr, (armR0 + armR1) / 2, armR1, limbSeg, mat));
         group.add(jointBall(benEl, (armR0 + armR1) / 2 * 0.95, mat));
@@ -421,7 +533,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
       group.add(taperedLimb(sh, el, armR0, (armR0 + armR1) / 2, limbSeg, mat));
       group.add(jointBall(sh, armR0 * 0.9, mat));
       if (sx === breakSide) {
-        group.add(jointBall(el, armR0 * 0.65, mat));
+        group.add(brokenStump(el, (armR0 + armR1) / 2, seed + 403 + a, mat));
       } else {
         group.add(taperedLimb(el, wr, (armR0 + armR1) / 2, armR1, limbSeg, mat));
         group.add(jointBall(el, (armR0 + armR1) / 2 * 0.95, mat));
@@ -456,7 +568,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
     height = height !== undefined ? height : 1.8;
     o = o || {};
     var pose = o.pose || 'stand';
-    var mat = o.material || mats.marbleStatue;
+    var mat = o.material || matMarbleFig;
     var seed = o.seed !== undefined ? o.seed : (__figureAutoSeed += 17);
 
     if (pose === 'stand') {
@@ -511,7 +623,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
   var __caryatidCallIdx = 0;
   H.makeCaryatid = function (height) {
     height = height !== undefined ? height : 2.3;
-    var mat = mats.marbleStatue;
+    var mat = matMarbleFig;
     var callIdx = __caryatidCallIdx++;
     var seed = 31 + callIdx * 13;
     var rnd = makeRng(seed + 900);
@@ -770,7 +882,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
     group.add(cap);
 
     var height = 9;
-    var mat = mats.bronzePatina;
+    var mat = matBronzeFig;
     // arms:false — this statue's arms are custom-built below (shield arm, spear arm);
     // building buildStandingBody's own default pair too would leave two overlapping
     // sets of limbs, which is exactly what made earlier renders read as a confused
@@ -792,10 +904,13 @@ window.addFigureHelpers = function (THREE, mats, H) {
     helm.position.y = helmCenterY;
     helm.castShadow = true; helm.receiveShadow = true;
     group.add(helm);
-    // nose guard: a 4-sided (box-like) tapered prism, wide at the brow, narrowing to a point at the chin
-    var noseGuard = new THREE.Mesh(new THREE.CylinderGeometry(helmR * 0.05, helmR * 0.15, helmR * 1.15, 4), mat);
+    // nose guard: a 4-sided (box-like) tapered prism, wide at the brow, narrowing to a point at the chin.
+    // Pushed further forward of the dome (0.85 -> 0.97 * helmR) than before so a real
+    // shadow gap opens between it and the cheek flaps — at render distance a helmet
+    // whose features sit flush with the dome reads as one dark unbroken blob.
+    var noseGuard = new THREE.Mesh(new THREE.CylinderGeometry(helmR * 0.06, helmR * 0.17, helmR * 1.15, 4), mat);
     noseGuard.rotateY(PI / 4);
-    noseGuard.position.set(0, helmCenterY - helmR * 0.32, helmR * 0.85);
+    noseGuard.position.set(0, helmCenterY - helmR * 0.32, helmR * 0.97);
     noseGuard.castShadow = true; noseGuard.receiveShadow = true;
     group.add(noseGuard);
     // cheek flaps: curved wrap-around plates (partial cylindrical shells, not flat boxes)
@@ -817,8 +932,11 @@ window.addFigureHelpers = function (THREE, mats, H) {
       var hnx = hx / hd, hny = hy / hd, hnz = hz / hd;
       for (var eyeSide = -1; eyeSide <= 1; eyeSide += 2) {
         var eyeDx = hnx - eyeSide * 0.30, eyeDy = hny - (-0.10);
-        var eyeFall = gaussFall(sqrt(eyeDx * eyeDx + eyeDy * eyeDy), 0.16) * Math.max(0, hnz - 0.4);
-        hd -= helmR * 0.22 * eyeFall;
+        // Deepened and widened (0.16/0.22 -> 0.20/0.34) so the eye holes read as
+        // dark, clearly separated recesses at typical viewing distance instead of
+        // disappearing into the helmet's overall dark silhouette.
+        var eyeFall = gaussFall(sqrt(eyeDx * eyeDx + eyeDy * eyeDy), 0.20) * Math.max(0, hnz - 0.4);
+        hd -= helmR * 0.34 * eyeFall;
       }
       helmArr[hv] = hnx * hd; helmArr[hv + 1] = hny * hd; helmArr[hv + 2] = hnz * hd;
     }
@@ -830,6 +948,16 @@ window.addFigureHelpers = function (THREE, mats, H) {
       eyeRim.castShadow = true; eyeRim.receiveShadow = true;
       group.add(eyeRim);
     }
+    // brow band: a raised ridge running around the dome at eye level, standing
+    // slightly proud of the helmet shell. At render distance this is what makes
+    // the whole helmet read as a shaped object rather than a dark unbroken
+    // silhouette — it gives the sun a clean edge to catch a highlight along,
+    // separating the polished dome above from the darker brow/cheek zone below.
+    var browBand = new THREE.Mesh(new THREE.TorusGeometry(helmR * 0.99, helmR * 0.05, MOBILE ? 5 : 6, MOBILE ? 10 : 16), mat);
+    browBand.rotation.x = PI / 2;
+    browBand.position.y = helmCenterY - helmR * 0.06;
+    browBand.castShadow = true; browBand.receiveShadow = true;
+    group.add(browBand);
     // crest: a row of adjoining vertical slabs whose tops trace a smooth high arc
     // (nape to brow), reading as one continuous crest from any angle.
     var crestN = MOBILE ? 7 : 13, crestPeak = helmR * 1.55, crestLen = helmR * 2.5, crestBaseY = helmCenterY + helmR * 0.52;
