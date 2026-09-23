@@ -88,7 +88,8 @@ window.buildSouthSlope = function (THREE, mats, H) {
     return g;
   }
   // Rock apron
-  var apron = H.makeRockOutcrop(260, 120, 10, 3);
+  // Lower amplitude than the helper's default reads as a real hillside apron rather than dunes.
+  var apron = H.makeRockOutcrop(260, 120, 4.5, 3);
   apron.position.set(-60, -45, 85);
   apron.rotation.x = 0.31;
   group.add(apron);
@@ -159,10 +160,12 @@ window.buildSouthSlope = function (THREE, mats, H) {
   skeneBack.castShadow = true; skeneBack.receiveShadow = true;
   theatreGroup.add(skeneBack);
   var proColumns = [];
-  var proN = MOBILE ? 7 : 11;
+  var proN = MOBILE ? 4 : 6;
   for (var pc = 0; pc < proN; pc++) proColumns.push([-13.5 + pc * (27 / (proN - 1)), 19.6]);
   theatreGroup.add(H.makeDoricColumns(proColumns, { height: 3.4, baseD: 0.62, topD: 0.5, y: 0 }));
-  var proEnt = H.makeEntablature(28, 2, 0.9, { triglyphCount: MOBILE ? 6 : 10, cornice: true });
+  // Plain architrave/frieze/cornice only (no triglyph+guttae detail): a small stage-front
+  // colonnade doesn't need full Doric ornament, and it keeps the theatre's triangle budget low.
+  var proEnt = H.makeEntablature(28, 2, 0.9, { triglyphs: false, cornice: true });
   proEnt.position.set(0, 3.4 * 0.92, 20.1);
   theatreGroup.add(proEnt);
 
@@ -199,8 +202,10 @@ window.buildSouthSlope = function (THREE, mats, H) {
   var facadeHalfW = 38, bayCount = MOBILE ? 6 : 8;
   var bayW = (facadeHalfW * 2) / bayCount;
   var tierY = [0, 6.4, 12.8], tierH = 6.0, sillH = 0;
-  var backWall = new THREE.Mesh(new THREE.BoxGeometry(facadeHalfW * 2 + 2, 19.5, 1.0), mats.rockDark);
-  backWall.position.set(0, 9.75, 21.6);
+  // Recessed well behind the pier/arch front face (23.4) so each bay reads as a real shadowed
+  // opening with depth, not a flat wall with lines painted on it.
+  var backWall = new THREE.Mesh(new THREE.BoxGeometry(facadeHalfW * 2 + 2, 19.5, 1.2), mats.rockDark);
+  backWall.position.set(0, 9.75, 19.0);
   backWall.castShadow = true; backWall.receiveShadow = true;
   odeonGroup.add(backWall);
 
@@ -218,33 +223,39 @@ window.buildSouthSlope = function (THREE, mats, H) {
   for (var bt = 0; bt < 3; bt++) bandT.push({ p: [0, tierY[bt] + tierH + 0.35, 22.2] });
   odeonGroup.add(H.instance(bandGeo, mats.marbleWorn, bandT));
 
-  // Arched openings per bay per tier: a semicircular voussoir band spanning each bay, sitting on
-  // a springer lintel, with an open reveal beneath it (no infill mesh -> a real opening).
-  var archGeo = new THREE.TorusGeometry(bayW * 0.39, 0.32, 6, MOBILE ? 10 : 16, PI);
+  // Arched openings per bay per tier: a chunky semicircular voussoir band standing proud on the
+  // piers' own front face (not recessed inside them), sitting on a projecting springer lintel,
+  // with an open reveal beneath it down to the recessed dark back wall -- a real shadowed opening.
+  var archGeo = new THREE.TorusGeometry(bayW * 0.39, 0.5, 6, MOBILE ? 10 : 16, PI);
   var archT = [];
-  var springerGeo = new THREE.BoxGeometry(bayW - 1.1, 0.3, 2.4);
+  var springerGeo = new THREE.BoxGeometry(bayW - 1.1, 0.35, 2.6);
   var springerT = [];
+  var archZ = 23.35; // flush with the piers' front face (22.2 +/- 1.2 half-depth)
   for (var tier = 0; tier < 3; tier++) {
     for (var bay = 0; bay < bayCount; bay++) {
       var cx = -facadeHalfW + bayW * (bay + 0.5);
       var springY = tierY[tier] + tierH * 0.62;
-      springerT.push({ p: [cx, springY, 22.2] });
-      archT.push({ p: [cx, springY, 22.2] }); // default torus orientation: upper semicircle in the XY plane, facing +z
+      springerT.push({ p: [cx, springY, archZ] });
+      archT.push({ p: [cx, springY, archZ] }); // default torus orientation: upper semicircle in the XY plane, facing +z
     }
   }
   odeonGroup.add(H.instance(archGeo, mats.marbleWorn, archT));
   odeonGroup.add(H.instance(springerGeo, mats.marbleWorn, springerT));
 
-  // Shallow recessed niche floor visible through each opening (reads as depth, not a hole to the sky)
+  // Recessed niche floor + back panel visible through each opening: with the back wall now ~4.4m
+  // behind the arch face, this dark, shadowed rectangle is what reads as "depth" from a distance.
   var nicheFloorGeo = new THREE.BoxGeometry(bayW - 1.3, 0.15, 1.6);
-  var nicheFloorT = [];
+  var nicheBackGeo = new THREE.BoxGeometry(bayW - 1.2, tierH * 0.72, 0.2);
+  var nicheFloorT = [], nicheBackT = [];
   for (var tier2 = 0; tier2 < 3; tier2++) {
     for (var bay2 = 0; bay2 < bayCount; bay2++) {
       var cx2 = -facadeHalfW + bayW * (bay2 + 0.5);
-      nicheFloorT.push({ p: [cx2, tierY[tier2] + 0.1, 21.4] });
+      nicheFloorT.push({ p: [cx2, tierY[tier2] + 0.1, 20.0] });
+      nicheBackT.push({ p: [cx2, tierY[tier2] + tierH * 0.36 + 0.1, 19.65] });
     }
   }
   odeonGroup.add(H.instance(nicheFloorGeo, mats.marbleShadowed, nicheFloorT));
+  odeonGroup.add(H.instance(nicheBackGeo, mats.rockDark, nicheBackT));
 
   // Cornice capping the whole facade
   var facadeCornice = new THREE.Mesh(new THREE.BoxGeometry(facadeHalfW * 2 + 3, 0.8, 3), mats.marble);

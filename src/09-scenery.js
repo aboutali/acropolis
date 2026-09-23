@@ -53,7 +53,9 @@ window.buildScenery = function (THREE, mats, H) {
   while (oliveCount < 34 && attempts < maxAttempts) {
     attempts++;
     var angle = rnd() * Math.PI * 2;
-    var radiusFactor = 0.78 + rnd() * (0.92 - 0.78);
+    // Kept inside the flat esplanade (e < ~0.86): trees sit at a fixed trunk height, and past
+    // that radius the plateau surface starts folding down to meet the cliff mesh below.
+    var radiusFactor = 0.72 + rnd() * (0.85 - 0.72);
     var rx = 148, rz = 73;
     var x = -45 + Math.cos(angle) * rx * radiusFactor;
     var z = 0 + Math.sin(angle) * rz * radiusFactor;
@@ -107,24 +109,31 @@ window.buildScenery = function (THREE, mats, H) {
   }
   group.add(H.instance(rootGeo, mats.trunk, rootT));
 
-  // Clumpy canopies: 4-5 overlapping irregular blobs per tree instead of 3 uniform ones.
+  // Clumpy canopies: 6-7 smaller, more widely-spaced blobs per tree with visible gaps between
+  // them, instead of a few large lobes that merge into one smooth silhouette at a distance.
   var oliveCanopyTransforms = [];
   for (var i = 0; i < oliveTrees.length; i++) {
     var tree = oliveTrees[i];
-    var lobes = 4 + (i % 2);
+    var lobes = 6 + (i % 2);
     for (var j = 0; j < lobes; j++) {
       var offsetAngle = (j / lobes) * Math.PI * 2 + rnd() * 0.6;
-      var offsetDist = 1.1 + rnd() * 0.9;
+      var offsetDist = 1.5 + rnd() * 1.3;
       var offsetX = tree.x + Math.cos(offsetAngle) * offsetDist;
       var offsetZ = tree.z + Math.sin(offsetAngle) * offsetDist;
-      var offsetY = 3.1 + (rnd() - 0.5) * 2 * 0.9;
-      var scale = 0.75 + rnd() * 0.55;
+      var offsetY = 3.0 + (rnd() - 0.5) * 2 * 1.0;
+      var scale = 0.5 + rnd() * 0.4;
       oliveCanopyTransforms.push({
         p: [offsetX, offsetY, offsetZ],
         r: [rnd() * PI, rnd() * PI, rnd() * PI],
         s: [scale, scale * (0.75 + rnd() * 0.3), scale]
       });
     }
+    // A central anchor lobe so the crown still reads as one tree, not just a ring of blobs.
+    oliveCanopyTransforms.push({
+      p: [tree.x, 3.0 + (rnd() - 0.5), tree.z],
+      r: [rnd() * PI, rnd() * PI, rnd() * PI],
+      s: [0.85, 0.65, 0.85]
+    });
   }
   group.add(H.instance(new THREE.IcosahedronGeometry(1.7, 0), mats.foliageOlive, oliveCanopyTransforms));
 
@@ -140,7 +149,9 @@ window.buildScenery = function (THREE, mats, H) {
   var fragCount = MOBILE ? 26 : 60;
   for (var i = 0; i < fragCount; i++) {
     var angle2 = (i / fragCount) * Math.PI * 2 + rnd() * 0.3;
-    var radiusFactor2 = 0.85 + rnd() * (0.93 - 0.85);
+    // Kept inside the flat esplanade (e < ~0.86): past that the plateau surface folds down to
+    // meet the cliff, and these fragments sit at a fixed y so they'd float above/sink into it.
+    var radiusFactor2 = 0.78 + rnd() * (0.85 - 0.78);
     var rbx = -45 + Math.cos(angle2) * 148 * radiusFactor2;
     var rbz = 0 + Math.sin(angle2) * 73 * radiusFactor2;
     var yaw = rnd() * Math.PI * 2;
