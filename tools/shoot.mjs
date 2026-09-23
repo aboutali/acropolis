@@ -1,5 +1,7 @@
 // Headless screenshots of index.html for visual review. Output goes to tools/shots/ (gitignored).
 // Usage: node tools/shoot.mjs [view ...]   (default: every preset). Needs Playwright (global install is fine).
+//        node tools/shoot.mjs --at '{"t":[x,y,z],"r":30,"theta":0.5,"phi":1.3}' name   (custom camera, desktop only)
+// DESK_ONLY=1 skips the phone viewport.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -11,7 +13,10 @@ const require = createRequire(import.meta.url);
 let pw;
 try { pw = require('playwright'); } catch { pw = require(path.join(execSync('npm root -g').toString().trim(), 'playwright')); }
 
-const views = process.argv.slice(2).length ? process.argv.slice(2)
+let custom = null;
+const argv = process.argv.slice(2);
+if (argv[0] === '--at') { custom = JSON.parse(argv[1]); argv.splice(0, 2); if (!argv.length) argv.push('custom'); process.env.DESK_ONLY = '1'; }
+const views = argv.length ? argv
   : ['overview', 'parthenon', 'erechtheion', 'propylaea', 'promachos', 'southslope'];
 fs.mkdirSync(OUT, { recursive: true });
 // Serve three.js from a local cache so the page works behind proxies and offline
@@ -25,7 +30,11 @@ for (const [label, vp] of [['desk', { width: 1280, height: 800 }], ['phone', { w
   page.on('console', m => { if (m.type() === 'error') console.log(`[${label}] console: ${m.text()}`); });
   page.on('pageerror', e => console.log(`[${label}] pageerror: ${e.message}`));
   for (const v of views) {
-    await page.goto(`file://${ROOT}/index.html?view=${v}&still&debug`);
+    await page.goto(`file://${ROOT}/index.html?view=${custom ? 'overview' : v}&still&debug`);
+    if (custom) {
+      await page.waitForTimeout(2500);
+      await page.evaluate(c => window.acropolisCtrl.jumpTo(c), custom);
+    }
     await page.waitForTimeout(6000);
     const file = path.join(OUT, `${v}-${label}.png`);
     await page.screenshot({ path: file });
