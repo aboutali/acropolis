@@ -84,15 +84,17 @@ window.makeHelpers = function (THREE, mats) {
     var flutes = opts.flutes !== undefined ? opts.flutes : 20;
     var entasis = opts.entasis !== undefined ? opts.entasis : 0.02;
     var y = opts.y !== undefined ? opts.y : 0;
-    var drums = opts.drums !== undefined ? opts.drums : 3;
+    var drums = opts.drums !== undefined ? opts.drums : 2;
+    // Cheap path for columns nobody gets close to (deep interior colonnades
+    // seen only, if at all, through a doorway): no flute deformation, no
+    // annulet/joint bands, low segment counts everywhere.
+    var simple = !!opts.simple;
     var group = new THREE.Group();
 
     // Enough radial segments that each flute gets a couple of faces (crisp
     // arris) without blowing the triangle budget across dozens of columns.
-    // Bumped ~15% over the previous cap so the arris edge (where adjacent
-    // flute normals meet) stays a hard line even in close-up shots.
-    var radial = Math.max(flutes * 2, Math.min(MOBILE ? 32 : 50, flutes * 2));
-    var heightSeg = MOBILE ? 4 : 6;
+    var radial = simple ? 16 : Math.max(flutes * 2, Math.min(MOBILE ? 32 : 44, flutes * 2));
+    var heightSeg = simple ? 1 : (MOBILE ? 3 : 4);
     var neckFrac = 0.05;                    // hypotrachelion band, as a fraction of shaftH
     var shaftFrac = 1 - neckFrac;
     var shaftH = height * 0.90;             // fluted shaft + necking; echinus+abacus ride above it
@@ -100,34 +102,62 @@ window.makeHelpers = function (THREE, mats) {
     var abacusH = height * 0.045;
 
     var shaftGeo = new THREE.CylinderGeometry(topD / 2, baseD / 2, shaftH, radial, heightSeg);
-    var pos = shaftGeo.getAttribute('position');
-    var arr = pos.array;
-    var i, px, py, pz, theta, r, yN, taper, ent, neckFac, nt, newR;
-    for (i = 0; i < arr.length; i += 3) {
-      px = arr[i]; py = arr[i + 1]; pz = arr[i + 2];
-      theta = atan2(pz, px);
-      r = sqrt(px * px + pz * pz);
-      yN = (py + shaftH / 2) / shaftH;
-      ent = 1 + entasis * sin(PI * Math.min(yN, shaftFrac) / shaftFrac);
-      if (yN <= shaftFrac) {
-        // Power-shaped (not pure cosine) profile: valleys stay near full depth
-        // across most of the arc while the arris narrows to a crisp edge —
-        // real Doric fluting is wide concave arcs meeting at a sharp line,
-        // not an even sinusoidal scallop, and this reads as much stronger
-        // shadow definition along each flute.
-        taper = 1 - 0.07 * Math.pow(0.5 + 0.5 * cos(flutes * theta), 0.58);
-        neckFac = 1;
-      } else {
-        taper = 1;                          // hypotrachelion: plain, unfluted band
-        nt = (yN - shaftFrac) / neckFrac;
-        neckFac = 0.965 - 0.02 * Math.exp(-Math.pow((nt - 0.5) * 7, 2)); // incised necking groove
+    if (!simple) {
+      var pos = shaftGeo.getAttribute('position');
+      var arr = pos.array;
+      var i, px, py, pz, theta, r, yN, taper, ent, neckFac, nt, newR;
+      for (i = 0; i < arr.length; i += 3) {
+        px = arr[i]; py = arr[i + 1]; pz = arr[i + 2];
+        theta = atan2(pz, px);
+        r = sqrt(px * px + pz * pz);
+        yN = (py + shaftH / 2) / shaftH;
+        ent = 1 + entasis * sin(PI * Math.min(yN, shaftFrac) / shaftFrac);
+        if (yN <= shaftFrac) {
+          // Power-shaped (not pure cosine) profile: valleys stay near full depth
+          // across most of the arc while the arris narrows to a crisp edge —
+          // real Doric fluting is wide concave arcs meeting at a sharp line,
+          // not an even sinusoidal scallop, and this reads as much stronger
+          // shadow definition along each flute.
+          taper = 1 - 0.09 * Math.pow(0.5 + 0.5 * cos(flutes * theta), 0.42);
+          neckFac = 1;
+        } else {
+          taper = 1;                          // hypotrachelion: plain, unfluted band
+          nt = (yN - shaftFrac) / neckFrac;
+          neckFac = 0.965 - 0.02 * Math.exp(-Math.pow((nt - 0.5) * 7, 2)); // incised necking groove
+        }
+        newR = r * taper * ent * neckFac;
+        arr[i] = newR * cos(theta);
+        arr[i + 2] = newR * sin(theta);
       }
-      newR = r * taper * ent * neckFac;
-      arr[i] = newR * cos(theta);
-      arr[i + 2] = newR * sin(theta);
+      pos.needsUpdate = true;
+      // Duplicate every vertex per-triangle (toNonIndexed) BEFORE computing
+      // normals: with no shared indices left, computeVertexNormals gives
+      // each vertex the flat normal of its own triangle instead of an
+      // average blended across the smooth interior of a flute and its
+      // neighbour — the arris (where two flutes meet) reads as a true hard
+      // shadow line instead of a soft gradient, at zero extra triangle cost.
+      shaftGeo = shaftGeo.toNonIndexed();
+      shaftGeo.computeVertexNormals();
+    } else {
+      shaftGeo.computeVertexNormals();
     }
-    pos.needsUpdate = true;
-    shaftGeo.computeVertexNormals();
+
+    var shaftT = [], echinusT = [], abacusT = [], annuletT = [], jointT = [];
+    if (simple) {
+      // Plain drum + shallow cap, no ovolo curve, no necking rings.
+      var echinusGeoS = new THREE.CylinderGeometry(topD * 0.56, topD * 0.5, echinusH, 12);
+      var abacusGeoS = new THREE.BoxGeometry(topD * 1.32, abacusH, topD * 1.32);
+      for (var si = 0; si < positions.length; si++) {
+        var scx = positions[si][0], scz = positions[si][1];
+        shaftT.push({ p: [scx, y + shaftH / 2, scz] });
+        echinusT.push({ p: [scx, y + shaftH + echinusH / 2, scz] });
+        abacusT.push({ p: [scx, y + shaftH + echinusH + abacusH / 2, scz] });
+      }
+      group.add(H.instance(shaftGeo, mats.marbleWorn, shaftT));
+      group.add(H.instance(echinusGeoS, mats.marbleWorn, echinusT));
+      group.add(H.instance(abacusGeoS, mats.marbleWorn, abacusT));
+      return group;
+    }
 
     // Echinus: curved ovolo profile as a surface of revolution.
     var neckR = topD / 2 * 0.955;
@@ -138,12 +168,11 @@ window.makeHelpers = function (THREE, mats) {
       new THREE.Vector2(topD * 0.63, echinusH * 0.88),
       new THREE.Vector2(topD * 0.605, echinusH)
     ];
-    var echinusGeo = new THREE.LatheGeometry(lathePts, Math.min(radial, MOBILE ? 23 : 32));
+    var echinusGeo = new THREE.LatheGeometry(lathePts, Math.min(radial, MOBILE ? 16 : 20));
     var abacusGeo = new THREE.BoxGeometry(topD * 1.32, abacusH, topD * 1.32);
-    var annuletGeo = new THREE.CylinderGeometry(neckR * 1.045, neckR * 1.045, height * 0.006, Math.min(radial, MOBILE ? 18 : 28));
-    var jointGeo = new THREE.CylinderGeometry(1, 1, height * 0.0035, Math.min(radial, MOBILE ? 16 : 23)); // unit radius, scaled per joint
+    var annuletGeo = new THREE.CylinderGeometry(neckR * 1.045, neckR * 1.045, height * 0.006, Math.min(radial, MOBILE ? 12 : 16));
+    var jointGeo = new THREE.CylinderGeometry(1, 1, height * 0.0035, Math.min(radial, MOBILE ? 10 : 14)); // unit radius, scaled per joint
 
-    var shaftT = [], echinusT = [], abacusT = [], annuletT = [], jointT = [];
     var annuletBand = height * 0.02;
     for (i = 0; i < positions.length; i++) {
       var cx = positions[i][0], cz = positions[i][1];
@@ -181,14 +210,14 @@ window.makeHelpers = function (THREE, mats) {
     var group = new THREE.Group();
 
     var radial = Math.max(flutes * 2, Math.min(MOBILE ? 26 : 40, flutes * 2));
-    var heightSeg = MOBILE ? 4 : 6;
+    var heightSeg = MOBILE ? 3 : 4;
     var baseH = height * 0.045;
     var shaftH = height * 0.80;
     var bandH = height * 0.05;
     var capH = height * 0.05;
     var abacusH = height * 0.032;
 
-    var baseGeo = new THREE.CylinderGeometry(baseD * 0.62, baseD * 0.68, baseH, 24);
+    var baseGeo = new THREE.CylinderGeometry(baseD * 0.62, baseD * 0.68, baseH, MOBILE ? 12 : 16);
     var shaftGeo = new THREE.CylinderGeometry(topD / 2, baseD * 0.6, shaftH, radial, heightSeg);
     var pos = shaftGeo.getAttribute('position'); var arr = pos.array;
     var i, px, py, pz, theta, r, yN, ent, newR;
@@ -200,23 +229,29 @@ window.makeHelpers = function (THREE, mats) {
       newR = r * (1 - 0.028 * (0.5 + 0.5 * cos(flutes * theta))) * ent;
       arr[i] = newR * cos(theta); arr[i + 2] = newR * sin(theta);
     }
-    pos.needsUpdate = true; shaftGeo.computeVertexNormals();
+    pos.needsUpdate = true;
+    // Same seam-hardening trick as the Doric shaft: break normal smoothing
+    // at each flute arris by duplicating vertices per-triangle first.
+    shaftGeo = shaftGeo.toNonIndexed();
+    shaftGeo.computeVertexNormals();
 
     // Egg-and-dart ovolo band beneath the volutes: eggs (rounded, raised) and
     // darts (slender, recessed) alternate for real radial depth and a hard
     // shadow line between them, instead of a ring of flat-looking bumps.
-    var bandGeo = new THREE.CylinderGeometry(topD * 0.56, topD * 0.58, bandH, Math.min(radial, MOBILE ? 16 : 22));
-    var eggCount = MOBILE ? 6 : 10;
-    var eggGeo = new THREE.SphereGeometry(topD * 0.085, MOBILE ? 8 : 10, MOBILE ? 6 : 8);
-    var dartGeo = new THREE.ConeGeometry(topD * 0.032, topD * 0.16, 6);
+    var bandGeo = new THREE.CylinderGeometry(topD * 0.56, topD * 0.58, bandH, Math.min(radial, MOBILE ? 12 : 16));
+    var eggCount = MOBILE ? 4 : 6;
+    var eggGeo = new THREE.SphereGeometry(topD * 0.085, MOBILE ? 5 : 6, MOBILE ? 4 : 4);
+    var dartGeo = new THREE.ConeGeometry(topD * 0.032, topD * 0.16, 5);
     var eggR = topD * 0.58 * 1.06;
 
     // Sculptural double-spiral volute: a torus for the outer coil plus a
     // smaller concentric torus for the inner wind, with a raised "eye" boss
     // at the centre — reads as a real 3D scroll instead of a flat ring.
-    var voluteGeo = new THREE.TorusGeometry(topD * 0.23, topD * 0.095, MOBILE ? 8 : 12, MOBILE ? 16 : 24);
-    var voluteInnerGeo = new THREE.TorusGeometry(topD * 0.115, topD * 0.05, MOBILE ? 6 : 10, MOBILE ? 12 : 18);
-    var voluteEyeGeo = new THREE.SphereGeometry(topD * 0.05, MOBILE ? 6 : 8, MOBILE ? 5 : 6);
+    // (Segment counts trimmed hard: there are dozens of these per building
+    // and the scroll only needs to read at a glance, not bear close study.)
+    var voluteGeo = new THREE.TorusGeometry(topD * 0.23, topD * 0.095, MOBILE ? 6 : 8, MOBILE ? 10 : 12);
+    var voluteInnerGeo = new THREE.TorusGeometry(topD * 0.115, topD * 0.05, MOBILE ? 5 : 6, MOBILE ? 8 : 8);
+    var voluteEyeGeo = new THREE.SphereGeometry(topD * 0.05, MOBILE ? 5 : 5, MOBILE ? 4 : 4);
     var abacusGeo = new THREE.BoxGeometry(topD * 1.55, abacusH, topD * 1.12);
 
     var baseT = [], shaftT = [], bandT = [], eggT = [], dartT = [], voluteT = [], voluteInnerT = [], voluteEyeT = [], abacusT = [];
@@ -405,13 +440,15 @@ window.makeHelpers = function (THREE, mats) {
       // hanging studs rather than a faint speckle at normal view distance.
       if (guttae && !isIonic) {
         var reguGeo = new THREE.BoxGeometry(trigW * 0.94, archH * 0.075, 0.13);
-        var guttaGeo = new THREE.CylinderGeometry(0.034, 0.06, 0.10, 6);
+        var guttaGeo = new THREE.CylinderGeometry(0.034, 0.06, 0.10, 4);
         for (var t2 = 0; t2 < trigTransforms.length; t2++) {
           var g = trigTransforms[t2];
           var facing = [sin(g.r[1]) * 0.14, -cos(g.r[1]) * 0.14];
           reguT.push({ p: [g.p[0] - facing[0], archH - archH * 0.032, g.p[2] - facing[1]], r: g.r });
-          for (var gx = -1; gx <= 1; gx++) for (var gy = 0; gy < 2; gy++) {
-            guttaT.push({ p: [g.p[0] - facing[0] + gx * trigW * 0.28, archH - archH * 0.09 - gy * 0.075, g.p[2] - facing[1]], r: [PI, 0, 0] });
+          // A single row of 3 (not 2 rows of 3): still reads as a hanging
+          // stud row at normal viewing distance, at half the instance cost.
+          for (var gx = -1; gx <= 1; gx++) {
+            guttaT.push({ p: [g.p[0] - facing[0] + gx * trigW * 0.28, archH - archH * 0.09, g.p[2] - facing[1]], r: [PI, 0, 0] });
           }
         }
         group.add(H.instance(reguGeo, mats.marble, reguT));
@@ -428,70 +465,30 @@ window.makeHelpers = function (THREE, mats) {
     // shared helper never hardcodes any one building's iconography.
     if (triglyphs && metopeMaker) {
       var idx = 0;
-      // metopeMaker's own carving detail comes from another stream's module;
-      // regardless of how much detail it puts in the plate, every bay also
-      // gets a cheap instanced figure group standing proud of the plate face
-      // (torso + head + a raised weapon/limb accent), so the frieze always
-      // reads as carved sculpture with real light/shadow rather than a row
-      // of blank rectangles even if the plate itself is plain.
+      // metopeMaker's own mesh (another stream's module) already carries
+      // whatever carved-figure detail it wants per plate — placing a second,
+      // independent instanced figure rig on top of every bay here was pure
+      // duplicate geometry (the plate's own relief already reads as carved
+      // sculpture), so this just seats the caller's mesh in each bay.
       var relH = friezeH * 0.86;
-      // Figure geometry is scaled up ~40% over the bay proportion so the
-      // accent sculpture reads clearly at normal viewing distance instead of
-      // as small barely-noticeable bumps; relH itself still drives placement
-      // within the bay.
-      var figScale = 1.4;
-      var fH = relH * figScale;
-      var figTorsoGeo = new THREE.BoxGeometry(fH * 0.24, fH * 0.5, 0.1);
-      var figHeadGeo = new THREE.SphereGeometry(fH * 0.1, 8, 6);
-      var figLimbGeo = new THREE.CylinderGeometry(fH * 0.045, fH * 0.045, fH * 0.34, 6);
-      var figPropGeo = new THREE.CylinderGeometry(fH * 0.028, fH * 0.028, fH * 0.72, 5);
-      var torsoT = [], headT = [], limbT = [], propT = [];
-      function addFigure(baseX, baseY, baseZ, rightX, rightZ, outX, outZ, ry, lx, tilt, outJitter, withProp) {
-        var out = 0.15 + outJitter;
-        var fx = baseX + rightX * lx + outX * out, fz = baseZ + rightZ * lx + outZ * out;
-        torsoT.push({ p: [fx, baseY, fz], r: [0, ry, tilt * 0.3] });
-        headT.push({ p: [fx + rightX * tilt * fH * 0.12, baseY + fH * 0.33, fz + rightZ * tilt * fH * 0.12], r: [0, ry, 0] });
-        limbT.push({ p: [fx - rightX * fH * 0.1, baseY - fH * 0.02, fz - rightZ * fH * 0.1], r: [0, ry, PI / 2 + tilt * 0.6] });
-        // Small weapon/staff prop on some figures — a diagonal rod crossing
-        // the torso silhouette, breaking up the outline like a spear or
-        // walking-staff would on a real carved combatant/traveller figure.
-        if (withProp) {
-          propT.push({ p: [fx + rightX * fH * 0.05, baseY + fH * 0.05, fz + rightZ * fH * 0.05], r: [0, ry, PI / 4 + tilt * 0.5] });
-        }
-      }
       function metopeRow(count, step, axisIsX, sign) {
-        var rightX = axisIsX ? 1 : 0, rightZ = axisIsX ? 0 : 1;
-        var outX = axisIsX ? 0 : sign, outZ = axisIsX ? sign : 0;
         var ry = axisIsX ? (sign > 0 ? 0 : PI) : (sign > 0 ? PI / 2 : -PI / 2);
         for (var n = 0; n < count + 1; n++) {
           var c = -((axisIsX ? w : d) / 2) + step * (n + 0.5);
           var mw = Math.min(step * 0.82, 1.4);
           var mesh = metopeMaker(idx++, mw, relH);
+          if (!mesh) continue;
           var baseX = axisIsX ? c : sign * (w / 2 + 0.03);
           var baseZ = axisIsX ? sign * (d / 2 + 0.03) : c;
-          var baseY = archH + friezeH / 2;
-          if (mesh) {
-            mesh.position.set(baseX, baseY, baseZ);
-            mesh.rotation.y = ry;
-            group.add(mesh);
-          }
-          var duo = rnd() < 0.4;
-          // Front-to-back and left-right stagger: each figure gets its own
-          // outward-standoff jitter (not a fixed 0.15) and a wider lateral
-          // spread so a duo visibly overlaps in depth rather than sitting on
-          // one flat plane.
-          addFigure(baseX, baseY - fH * 0.05, baseZ, rightX, rightZ, outX, outZ, ry, duo ? -mw * 0.2 : 0, (rnd() - 0.5) * 2, (rnd() - 0.5) * 0.1, rnd() < 0.35);
-          if (duo) addFigure(baseX, baseY - fH * 0.08, baseZ, rightX, rightZ, outX, outZ, ry, mw * 0.22, (rnd() - 0.5) * 2, (rnd() - 0.5) * 0.1 - 0.04, rnd() < 0.35);
+          mesh.position.set(baseX, archH + friezeH / 2, baseZ);
+          mesh.rotation.y = ry;
+          group.add(mesh);
         }
       }
       metopeRow(triglyphCount, xStep, true, 1);
       metopeRow(triglyphCount, xStep, true, -1);
       metopeRow(zCount, zStep, false, 1);
       metopeRow(zCount, zStep, false, -1);
-      group.add(H.instance(figTorsoGeo, mats.marbleRelief, torsoT));
-      group.add(H.instance(figHeadGeo, mats.marbleRelief, headT));
-      group.add(H.instance(figLimbGeo, mats.marbleShadowed, limbT));
-      if (propT.length) group.add(H.instance(figPropGeo, mats.marbleShadowed, propT));
     }
 
     // ---- Cornice -------------------------------------------------------
@@ -525,13 +522,15 @@ window.makeHelpers = function (THREE, mats) {
       } else {
         // Mutules + guttae on the soffit, one set per triglyph position.
         var mutGeo = new THREE.BoxGeometry(1.05, corniceH * 0.12, 0.62);
-        var mGuttaGeo = new THREE.CylinderGeometry(0.032, 0.054, 0.09, 6);
+        var mGuttaGeo = new THREE.CylinderGeometry(0.032, 0.054, 0.09, 4);
         for (var t3 = 0; t3 < trigTransforms.length; t3++) {
           var g2 = trigTransforms[t3];
           var facing2 = [sin(g2.r[1]) * (0.62 / 2 + 0.02), -cos(g2.r[1]) * (0.62 / 2 + 0.02)];
           var soffitY = archH + friezeH + corniceH * 0.55;
           mutuleT.push({ p: [g2.p[0] + facing2[0], soffitY, g2.p[2] + facing2[1]], r: [0, g2.r[1], 0] });
-          for (var mgx = -1; mgx <= 1; mgx++) for (var mgz = -1; mgz <= 1; mgz++) {
+          // A 2x2 corner grid (not 3x3): still reads as a mutule's gutta
+          // cluster at normal viewing distance, well under half the cost.
+          for (var mgx = -1; mgx <= 1; mgx += 2) for (var mgz = -1; mgz <= 1; mgz += 2) {
             var lo = rotXZ(mgx * 0.32, mgz * 0.18, g2.r[1]);
             mutGuttaT.push({ p: [g2.p[0] + facing2[0] + lo[0], soffitY - 0.05, g2.p[2] + facing2[1] + lo[1]], r: [PI, 0, 0] });
           }
@@ -738,82 +737,58 @@ window.makeHelpers = function (THREE, mats) {
     var panT = [], coverT = [], antefixT = [], antefixCapT = [];
     var rndRoof = seedRand(Math.round(w * 331 + d * 71 + pitch * 9007) + 3);
     if (tiles) {
-      var panW = MOBILE ? 0.62 : 0.5;
-      var colCount = Math.max(2, Math.round((w / 2) / panW));
-      panW = (w / 2) / colCount;
-      // Pan and cover tiles are laid as short, irregularly overlapping runs
-      // along the slope depth rather than one continuous board or a single
-      // grid of even segments: each tile's length, lateral width, vertical
-      // seat and along-slope position all get independent jitter, adjacent
-      // columns are offset by a running-bond stagger, and consecutive tiles
-      // overlap by a variable 30-40% of their own length — which is what
-      // actually breaks the "mathematical panel grid" look at close range.
-      var slotLen = d / Math.max(2, Math.round(d / (MOBILE ? 12 : 6.5)));
-      var subCount = Math.max(2, Math.round(d / slotLen));
-      slotLen = d / subCount;
+      // Pan tiles run the full ridge-to-eave slope in one board per row (a
+      // "row" = one course laid side-by-side along the eave/depth axis),
+      // reusing the SAME position+rotation reference as the underlying slab
+      // (slabPos/slabRot above) and only ever shrinking that footprint —
+      // never re-deriving it from scratch — so a tile can never stick out
+      // past the ridge or the eave/gable ends the way an independently
+      // computed along-slope offset previously could.
+      var rowW = MOBILE ? 0.62 : 0.5;
+      var rows = Math.max(2, Math.round(d / rowW));
+      rowW = d / rows;
+      var jointGap = rowW * 0.08;
       var panGeo = new THREE.BoxGeometry(1, 1, 1); // unit box; sized per-instance via `s`
-      // Cylinder's axis defaults to Y; rotate it into Z here so the shared
-      // geometry already runs along the slope, unit length so per-instance
-      // `s.z` gives each cover segment its own irregular length.
-      var coverGeo = new THREE.CylinderGeometry(panW * 0.16, panW * 0.16, 1, MOBILE ? 8 : 10, 1, true, 0, PI);
-      coverGeo.rotateX(PI / 2);
-      var antefixGeo = new THREE.BoxGeometry(panW * 0.5, 0.32, 0.04);
+      // Half-cylinder cap, unit length along local X (its own long axis),
+      // reused for both the seam covers and — scaled — the eave antefixes.
+      var coverGeo = new THREE.CylinderGeometry(1, 1, 1, MOBILE ? 6 : 8, 1, true, 0, PI);
+      coverGeo.rotateZ(PI / 2);
+      var antefixGeo = new THREE.BoxGeometry(0.05, 0.3, 1); // thin plaque; long axis (eave-parallel) sized via `s.z`
       for (var side = 0; side < 2; side++) {
         var sx = side === 0 ? 1 : -1;
-        for (var c = 0; c < colCount; c++) {
-          var cx = sx * (w / 4 - (c + 0.5) * panW * cos(angle));
-          var cy = ridgeH / 2 + (c + 0.5) * panW * sin(angle) + 0.13 * cos(angle);
-          var rowPhase = (c % 3 - 1) * slotLen * 0.22; // 3-way running-bond stagger
-          var wScale = 0.97 + rndRoof() * 0.06; // ±3% width, held per column
-          for (var su = 0; su < subCount; su++) {
-            var posJit = (rndRoof() - 0.5) * slotLen * 0.24;
-            var centerZ = -d / 2 + (su + 0.5) * slotLen + rowPhase + posJit;
-            centerZ = Math.max(-d / 2 + 0.02, Math.min(d / 2 - 0.02, centerZ));
-            var tileLen = slotLen * (1.42 + rndRoof() * 0.28); // 30-40% overlap on neighbours
-            // On a small roof (subCount pinned at its floor of 2) a single
-            // slot can be half the whole depth, so a naive 1.4-1.7x overlap
-            // would let the tile's HALF-length alone exceed the building's
-            // own depth and poke a long way past the eave. Clamp the half
-            // length to how far this tile's centre actually sits from
-            // either edge (plus a small fixed overlap allowance), so no
-            // tile can ever overshoot the roof footprint by more than ~0.3m
-            // regardless of how few slots the depth was divided into.
-            var edgeRoom = Math.min(d / 2 - centerZ, centerZ + d / 2) + 0.3;
-            var halfLen = Math.min(tileLen / 2, edgeRoom);
-            var jitterY = (rndRoof() - 0.5) * 0.04; // +/- 2 cm vertical seat
-            panT.push({
-              p: [cx, cy + jitterY, centerZ], r: [0, 0, side === 0 ? -angle : angle],
-              s: [panW * wScale * 0.92, 0.05, halfLen * 2]
-            });
-          }
-          // Cover-tile ridge over this column's seam, itself broken into a
-          // few overlapping lengths (phase-shifted from the pans below it)
-          // instead of one unbroken bar the full depth of the roof.
-          var coverX = c === 0 ? sx * (w / 4) : sx * (w / 4 - c * panW * cos(angle));
-          var coverY = c === 0 ? ridgeH / 2 + 0.13 * cos(angle) : ridgeH / 2 + c * panW * sin(angle) + 0.13 * cos(angle);
-          // Evenly-spaced slot centres with only a *modest* per-tile overlap
-          // (no along-slope jitter on the centre itself) — a cover segment's
-          // length must stay tightly bound to its own slot, since any slot
-          // near the ridge/eave end that's stretched by a large random
-          // factor would otherwise poke drastically past the roof footprint.
-          var coverSlot = Math.max(3, Math.round(d / (slotLen * 1.8)));
-          var coverSlotLen = d / coverSlot;
-          for (var cu = 0; cu < coverSlot; cu++) {
-            var cz = -d / 2 + (cu + 0.5) * coverSlotLen;
-            var coverLen = coverSlotLen * (1.08 + rndRoof() * 0.14);
-            coverT.push({ p: [coverX, coverY, cz], r: [0, 0, side === 0 ? -angle : angle], s: [1, 1, coverLen] });
-          }
+        var baseX = slabPos[side][0], baseY = slabPos[side][1], rotZ = slabRot[side][2];
+        // World offset for a small lift `t` along the slab's own local +Y
+        // (its face normal), so tiles sit just above the slab surface
+        // instead of z-fighting with it, however the slope is rotated.
+        var liftDir = [-sin(rotZ), cos(rotZ)];
+        for (var rIdx = 0; rIdx < rows; rIdx++) {
+          var z = -d / 2 + (rIdx + 0.5) * rowW;
+          var lenFrac = 0.965 + rndRoof() * 0.03; // always < 1: strictly inside the slab's own length
+          var lift = 0.03 + rndRoof() * 0.015;
+          panT.push({
+            p: [baseX + liftDir[0] * lift, baseY + liftDir[1] * lift, z], r: [0, 0, rotZ],
+            s: [slopeLen * lenFrac, 0.05, rowW - jointGap]
+          });
         }
-        // Antefixes along the whole eave boundary (every column on desktop,
-        // every other on mobile), each capped with a small palmette plaque
-        // (a crossed pair for readable silhouette from any angle) instead of
-        // a bare cone tip.
-        for (var af = 0; af <= colCount; af += (MOBILE ? 3 : 2)) {
-          var ax = sx * (w / 2 - af * panW * cos(angle));
-          antefixT.push({ p: [ax, 0.16, d / 2 + 0.02], r: [0, 0, 0] });
-          antefixT.push({ p: [ax, 0.16, -d / 2 - 0.02], r: [0, PI, 0] });
-          antefixCapT.push({ p: [ax, 0.16, d / 2 + 0.05], r: [0, 0, 0], s: [0.34, 0.32, 0.34] });
-          antefixCapT.push({ p: [ax, 0.16, -d / 2 - 0.05], r: [0, PI, 0], s: [0.34, 0.32, 0.34] });
+        // Cover caps over the interior seams only (never the gable-end
+        // seams), each also sized as a strict fraction of the slope length —
+        // same guarantee against overshoot as the pan tiles above. Lifted a
+        // little higher than the pan tiles so it sits proud of them.
+        var clift = 0.075;
+        for (var seam = 1; seam < rows; seam++) {
+          var sz = -d / 2 + seam * rowW;
+          coverT.push({
+            p: [baseX + liftDir[0] * clift, baseY + liftDir[1] * clift, sz], r: [0, 0, rotZ],
+            s: [slopeLen * 0.97, rowW * 0.16, rowW * 0.16]
+          });
+        }
+        // Antefixes along the true eave line (x = sx*w/2, y = 0), one per
+        // row, spread along the full depth — the eave itself, not the rake.
+        for (var ai = 0; ai < rows; ai += (MOBILE ? 2 : 1)) {
+          var az = -d / 2 + (ai + 0.5) * rowW;
+          var ry = side === 0 ? 0 : PI;
+          antefixT.push({ p: [sx * (w / 2 + 0.02), 0.15, az], r: [0, ry, 0], s: [1, 1, rowW * 0.6] });
+          antefixCapT.push({ p: [sx * (w / 2 + 0.05), 0.15, az], r: [0, ry + PI / 2, 0], s: [0.3, 0.28, 0.3] });
         }
       }
       // Roof tiles skip shadow-casting: this many small, thin, tightly
@@ -985,18 +960,22 @@ window.makeHelpers = function (THREE, mats) {
     var group = new THREE.Group();
     var rnd = seedRand(Math.round(w * 4001 + d * 617 + h * 89) + 5);
 
-    // Real Pentelic ashlar courses run closer to ~0.5 m tall / ~1.5 m long
+    // Real Pentelic ashlar courses run closer to ~0.6-0.7 m tall / ~1.5 m long
     // blocks; finer, more numerous coursing than a few thick slabs is what
-    // actually reads as individually dressed stone rather than a monolith.
-    var courseH = Math.max(0.4, h / Math.round(h / (MOBILE ? 0.72 : 0.52)));
+    // actually reads as individually dressed stone rather than a monolith
+    // (courseH nudged up slightly over the previous pass to keep the whole
+    // scene's block count, and so triangle cost, in budget).
+    var courseH = Math.max(0.55, h / Math.round(h / (MOBILE ? 0.9 : 0.72)));
     var courses = Math.max(1, Math.round(h / courseH));
     courseH = h / courses;
-    var blockLen = MOBILE ? 1.75 : 1.5;
-    // Bed (horizontal, between courses) joints read more prominently than
-    // the tighter vertical (block-to-block) joints, matching real opus
-    // quadratum coursing — both bumped over the previous pass for contrast.
-    var jointGapV = 0.045; // vertical joint between adjacent blocks in a course
-    var jointGapH = 0.06;  // bed joint between courses
+    var blockLen = MOBILE ? 1.9 : 1.7;
+    // Real ashlar is laid flush: courses run true and block faces sit in one
+    // plane, with only a fine (~1 cm) dark joint groove between them — not a
+    // wide gap with big in/out steps. Both gaps and the protrusion jitter
+    // below are sized to that: a joint you can see as a hairline, not a
+    // masonry course that reads as a staircase.
+    var jointGapV = 0.012; // vertical joint between adjacent blocks in a course
+    var jointGapH = 0.015; // bed joint between courses
 
     // Hand-dressed opus quadratum, not CNC ashlar: every course is a slightly
     // different natural height (renormalised so the wall still tops out at
@@ -1031,8 +1010,8 @@ window.makeHelpers = function (THREE, mats) {
           var along = -len / 2 + (b + 0.5) * bl + rowOffset;
           if (along > len / 2) along -= len;
           var jg = jointGapV * (0.6 + rnd() * 0.8);
-          var lift = (rnd() - 0.5) * 0.012;
-          var proud = (rnd() - 0.5) * 0.03;
+          var lift = (rnd() - 0.5) * 0.004;
+          var proud = (rnd() - 0.5) * 0.006;
           var px = cx + dx * along + nx * proud, pz = cz + dz * along + nz * proud;
           var t = { p: [px, cyBase + lift, pz], r: [0, ang, 0], s: [(bl - jg) / bl, (courseHeights[c] - jointGapH) / courseH, 1] };
           // Weathering reads as broad vertical iron-stain streaks (low-frequency

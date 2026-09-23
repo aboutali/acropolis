@@ -87,11 +87,37 @@ window.buildErechtheion = function (THREE, mats, H) {
     group.add(caryatidRear);
   }
 
-  // Caryatid entablature slab
-  var caryatidEntabSlab = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.9, 3.5), mats.marble);
-  caryatidEntabSlab.position.set(6, 1.8 + 2.3 + 0.45, 7.35);
-  caryatidEntabSlab.castShadow = true; caryatidEntabSlab.receiveShadow = true;
-  group.add(caryatidEntabSlab);
+  // Caryatid porch entablature: a three-fascia Ionic architrave, a dentil
+  // course, and a projecting cornice — not a plain slab. Cheap (a handful of
+  // boxes plus one small instanced dentil row), but reads as a real order
+  // resting on the maidens' heads instead of a block of stone.
+  (function () {
+    var capW = 5.4, capD = 3.5, capY = 1.8 + 2.3 + 0.05;
+    var archH = 0.42, dentilH = 0.14, corniceH = 0.33;
+    var fasciaH = archH / 3;
+    for (var fb = 0; fb < 3; fb++) {
+      var fw = capW - fb * 0.05, fd = capD - fb * 0.05;
+      var fascia = new THREE.Mesh(new THREE.BoxGeometry(fw, fasciaH * 0.94, fd), mats.marble);
+      fascia.position.set(6, capY + fasciaH * (fb + 0.5), 7.35);
+      fascia.castShadow = true; fascia.receiveShadow = true;
+      group.add(fascia);
+    }
+    var dentilY = capY + archH + dentilH / 2;
+    var dentilGeo = new THREE.BoxGeometry(0.12, dentilH, 0.2);
+    var dentilT = [];
+    var dCount = Math.round(capW / 0.2);
+    for (var di = 0; di < dCount; di++) {
+      var dx = 6 - capW / 2 + (di + 0.5) * (capW / dCount);
+      dentilT.push({ p: [dx, dentilY, 7.35 + capD / 2 - 0.05] });
+      dentilT.push({ p: [dx, dentilY, 7.35 - capD / 2 + 0.05] });
+    }
+    group.add(H.instance(dentilGeo, mats.marbleShadowed, dentilT));
+    var corniceOvh = 0.18;
+    var cornice = new THREE.Mesh(new THREE.BoxGeometry(capW + 2 * corniceOvh, corniceH, capD + 2 * corniceOvh), mats.marbleWorn);
+    cornice.position.set(6, capY + archH + dentilH + corniceH / 2, 7.35);
+    cornice.castShadow = true; cornice.receiveShadow = true;
+    group.add(cornice);
+  })();
 
   // West wall: 4 engaged half-columns at x = -10.6, z evenly spaced from -4 to 4
   var westPositions = [[-10.6, -4], [-10.6, -1.33333], [-10.6, 1.33333], [-10.6, 4]];
