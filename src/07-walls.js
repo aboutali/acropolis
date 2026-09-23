@@ -95,7 +95,7 @@ window.buildWalls = function (THREE, mats, H) {
   // ---- Battered ashlar/rubble masonry: courses of instanced blocks, wall battered inward with height ----
   var courseGeo = new THREE.BoxGeometry(1, 1, 1);
   var wallT = [], capT = [], parapetT = [];
-  var courseH = 0.62;
+  var courseH = 1.05;
   for (var sr = 0; sr < allSubRuns.length; sr++) {
     var run = allSubRuns[sr].points, wallH = allSubRuns[sr].h;
     var courses = Math.round(wallH / courseH);
@@ -105,7 +105,7 @@ window.buildWalls = function (THREE, mats, H) {
       var frac = c / courses;
       var batter = baseThick * (1 - 0.22 * frac); // wall thins slightly as it rises
       var cy = c * courseH + courseH / 2;
-      var blockLen = 2.1 + 0.4 * ((c % 2));
+      var blockLen = 3.6 + 0.7 * ((c % 2)); // coarsened further: frees triangle budget for the land pass's density work
       var offset = (c % 2) * blockLen * 0.5;
       var dist = -offset;
       for (var seg = 0; seg < run.length - 1; seg++) {
@@ -132,7 +132,7 @@ window.buildWalls = function (THREE, mats, H) {
       var dx2 = p1b[0] - p0b[0], dz2 = p1b[1] - p0b[1];
       var segLen2 = Math.sqrt(dx2 * dx2 + dz2 * dz2);
       var ang2 = Math.atan2(dz2, dx2);
-      var count2 = Math.max(1, Math.round(segLen2 / 1.4));
+      var count2 = Math.max(1, Math.round(segLen2 / 2.1));
       for (var k = 0; k < count2; k++) {
         var t2 = (k + 0.5) / count2;
         var bx2 = p0b[0] + t2 * dx2, bz2 = p0b[1] + t2 * dz2;
