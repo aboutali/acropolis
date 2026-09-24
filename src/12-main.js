@@ -44,7 +44,8 @@ window.startAcropolis = function () {
       // Stock SSAO is faint at this scale: raise its occlusion term to a power
       ssao.ssaoMaterial.fragmentShader = ssao.ssaoMaterial.fragmentShader.replace(
         'gl_FragColor = vec4( vec3( 1.0 - occlusion ), 1.0 );',
-        'gl_FragColor = vec4( vec3( pow( 1.0 - occlusion, 3.0 ) ), 1.0 );');
+        // Fade out beyond ~400 m (viewZ is negative), where depth precision turns AO into dither
+        'gl_FragColor = vec4( vec3( mix( pow( 1.0 - occlusion, 3.0 ), 1.0, smoothstep( 250.0, 450.0, -viewZ ) ) ), 1.0 );');
       ssao.ssaoMaterial.needsUpdate = true;
       if (location.search.indexOf('aoonly') >= 0) ssao.output = THREE.SSAOPass.OUTPUT.SSAO;
       composer.addPass(ssao);

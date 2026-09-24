@@ -783,9 +783,9 @@ window.buildMats = function (THREE) {
     // snapshotted by any pre-existing clone and wouldn't reach them).
     set([mats.marble], 'marble', MOBILE ? '' : '_2k');
     var marbleColUrl = 'assets/tex/marble_col.jpg', marbleNorUrl = 'assets/tex/marble_nor.jpg', marbleRoughUrl = 'assets/tex/marble_rough.jpg';
-    apply([mats.marbleWorn], 'map', marbleColUrl, [0.90, 0.84, 0.71]);
-    apply([mats.marbleShadowed], 'map', marbleColUrl, [0.72, 0.68, 0.60]);
-    apply([mats.marbleRelief], 'map', marbleColUrl, [0.96, 0.89, 0.77]);
+    apply([mats.marbleWorn], 'map', marbleColUrl, [1.0, 0.97, 0.9]);
+    apply([mats.marbleShadowed], 'map', marbleColUrl, [0.88, 0.85, 0.79]);
+    apply([mats.marbleRelief], 'map', marbleColUrl, [1.0, 0.96, 0.88]);
     apply([mats.marbleStatue], 'map', marbleColUrl);
     apply([mats.marbleWorn, mats.marbleShadowed, mats.marbleRelief, mats.marbleStatue], 'normalMap', marbleNorUrl);
     apply([mats.marbleWorn, mats.marbleRelief], 'roughnessMap', marbleRoughUrl);
@@ -794,7 +794,10 @@ window.buildMats = function (THREE) {
     set([mats.rock], 'rock');
     set([mats.rockDark], 'rockdark');
     set([mats.ground], 'ground');
-    set([mats.terracotta], 'terracotta');
+    // The photo tiles are tan; warm them toward fired clay
+    apply([mats.terracotta], 'map', 'assets/tex/terracotta_col.jpg', [1.05, 0.78, 0.62]);
+    apply([mats.terracotta], 'normalMap', 'assets/tex/terracotta_nor.jpg');
+    apply([mats.terracotta], 'roughnessMap', 'assets/tex/terracotta_rough.jpg');
     set([mats.plaster], 'plaster');
     // mats.bronze/bronzePatina, mats.city and the vegetation/gold/ivory materials have no
     // strong CC0 match worth the download budget; they keep their procedural look.

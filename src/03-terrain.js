@@ -108,7 +108,7 @@ window.buildTerrain = function (THREE, mats, H) {
   pos.needsUpdate = true;
   topGeo.computeVertexNormals();
   paintVertexColors(topGeo, 700);
-  var top = new THREE.Mesh(topGeo, weatheredMat(mats.rock, 700, 150));
+  var top = new THREE.Mesh(topGeo, weatheredMat(mats.rock, 700, 14));
   top.position.set(-45, 0, 0);
   top.receiveShadow = true;
   group.add(top);
@@ -290,7 +290,7 @@ window.buildTerrain = function (THREE, mats, H) {
   // A larger uvScale than the material's native tiling spreads the baked stone texture into
   // broad soft bands instead of a tight regular grid, so the strata read as bedding planes
   // rather than a faceted ashlar-like lattice (same fix as the plateau/apron materials).
-  var cliffMesh = new THREE.Mesh(cliffGeo, weatheredMat(mats.rockDark, 900, 220));
+  var cliffMesh = new THREE.Mesh(cliffGeo, weatheredMat(mats.rockDark, 900, 22));
   cliffMesh.castShadow = true;
   cliffMesh.receiveShadow = true;
   group.add(cliffMesh);

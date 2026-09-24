@@ -329,7 +329,7 @@ window.buildSouthSlope = function (THREE, mats, H) {
   // for the same fix). Fresh userData object so the shared mats.rock instance isn't mutated.
   apronMat.userData = {};
   for (var auk in mats.rock.userData) apronMat.userData[auk] = mats.rock.userData[auk];
-  apronMat.userData.uvScale = 150;
+  apronMat.userData.uvScale = 18;
   apron.material = apronMat;
   var apCol = new Float32Array(apPos.count * 3);
   var wv = new THREE.Vector3();
