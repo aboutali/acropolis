@@ -80,14 +80,22 @@ window.buildTerrain = function (THREE, mats, H) {
   }
   function plateauHeight(x, z) {
     var e = sqrt((x / 150) * (x / 150) + (z / 75) * (z / 75));
-    var bedrock = H.noise2(x * 0.04, z * 0.055, 23); // -1..1
-    var slab = clamp01((bedrock - 0.32) / 0.2); // a handful of raised bedrock slabs, smooth-edged
-    // Fine ripple gated off within ~30m of the rim fold (tighter than the previous ~50m band) and
-    // with a quartic (t^4) falloff instead of the cubic smoothstep, so the amplitude collapses to
-    // zero much faster right at the rim instead of trailing off as a visible wave.
-    var rippleT = (e - 0.80) / 0.06 < 0 ? 0 : (e - 0.80) / 0.06 > 1 ? 1 : (e - 0.80) / 0.06;
-    var rippleGate = 1 - rippleT * rippleT * rippleT * rippleT;
-    var y = 0.03 * fineWeather(x, z) * rippleGate + 0.22 * slab; // <= ~0.25m of texture + step, everywhere
+    // Interior of the plaza: a nearly flat rock platform. Fine mottling only, capped well under
+    // the 0.15m relief budget -- no broad slab bumps or long-wavelength dune-like swells.
+    var micro = 0.05 * fineWeather(x, z); // +-0.05m fine surface texture, everywhere
+    // A handful of exposed bedrock ledges, confined to a narrow band hugging the rim (inside the
+    // rim fold itself): gated both by radius (a tight ring just short of e=0.86, where the fold
+    // begins) and by a sparse noise threshold, so only a few isolated ledges break the platform
+    // instead of a field of raised slabs scattered across the whole summit.
+    var bedrock = H.noise2(x * 0.028, z * 0.042, 23); // -1..1, coarse so ledges read as distinct outcrops
+    var edgeBand = 0;
+    if (e > 0.66 && e < 0.86) {
+      var eIn = smooth(clamp01((e - 0.66) / 0.05));
+      var eOut = smooth(clamp01((0.86 - e) / 0.05));
+      edgeBand = eIn * eOut;
+    }
+    var ledge = clamp01((bedrock - 0.62) / 0.1) * edgeBand * 0.4; // up to ~0.4m, sparse, rim-only
+    var y = micro + ledge;
     if (e > 0.86) y -= (e - 0.86) * 34; // rim fold: blends into the cliff mesh, not "undulation"
     return y - cutAt(x, z);
   }

@@ -47,10 +47,11 @@ window.buildScenery = function (THREE, mats, H) {
   // ---------------- Olive groves: gnarled, twisted trunks with clumpy grey-green canopies ----------------
   var oliveTrees = [];
   var oliveCount = 0;
-  var maxAttempts = 1000;
+  var maxAttempts = 2000;
   var attempts = 0;
 
-  while (oliveCount < 34 && attempts < maxAttempts) {
+  var oliveTarget = MOBILE ? 34 : 46;
+  while (oliveCount < oliveTarget && attempts < maxAttempts) {
     attempts++;
     var angle = rnd() * Math.PI * 2;
     // Kept inside the flat esplanade (e < ~0.86): trees sit at a fixed trunk height, and past
@@ -92,6 +93,7 @@ window.buildScenery = function (THREE, mats, H) {
   tp.needsUpdate = true;
   trunkGeo.computeVertexNormals();
 
+  var trunkTopY = 2.05; // where the bare trunk ends and the crown of branches begins
   var oliveTrunkTransforms = [];
   for (var i = 0; i < oliveTrees.length; i++) {
     var ot = oliveTrees[i];
@@ -109,21 +111,31 @@ window.buildScenery = function (THREE, mats, H) {
   }
   group.add(H.instance(rootGeo, mats.trunk, rootT));
 
-  // Clumpy canopies: 6-7 smaller, more widely-spaced blobs per tree with visible gaps between
-  // them, instead of a few large lobes that merge into one smooth silhouette at a distance.
+  // Visible branches: a few thin gnarled limbs fork from the bare trunk top up toward each main
+  // canopy clump, so the crown reads as foliage carried on woodwork instead of a blob glued to a
+  // post. Cheap open-ended 4-sided cylinder (8 tris) per branch, oriented exactly at its clump.
+  // Orientation is worked out with plain trig (no Vector3/Quaternion) so a unit direction
+  // (dx,dy,dz) maps to an XYZ Euler [asin(dz), 0, atan2(-dx,dy)] that carries the cylinder's local
+  // +Y axis onto that direction.
+  var branchGeo = new THREE.CylinderGeometry(0.05, 0.11, 1, 4, 1, true);
+  var branchT = [];
+
+  // Clumpy canopies: several smaller, more widely-spaced blobs per tree with visible gaps between
+  // them (and the bare branch carrying each one visible beneath it), instead of a few large lobes
+  // that merge into one smooth silhouette at a distance.
   var oliveCanopyTransforms = [];
   for (var i = 0; i < oliveTrees.length; i++) {
     var tree = oliveTrees[i];
-    var lobes = 6 + (i % 2);
+    var lobes = 4 + (i % 2);
     for (var j = 0; j < lobes; j++) {
       var offsetAngle = (j / lobes) * Math.PI * 2 + rnd() * 0.6;
-      // Lobe separation widened ~20% so the gaps between clumps stay legible at medium distance
-      // (>200m) instead of the crown reading as one fused blob.
-      var offsetDist = 1.8 + rnd() * 1.56;
+      // Lobe separation kept wide relative to each clump's own (smaller) size so the gaps between
+      // clumps stay legible at medium distance instead of the crown reading as one fused blob.
+      var offsetDist = 1.5 + rnd() * 1.5;
       var offsetX = tree.x + Math.cos(offsetAngle) * offsetDist;
       var offsetZ = tree.z + Math.sin(offsetAngle) * offsetDist;
-      var offsetY = 3.0 + (rnd() - 0.5) * 2 * 1.0;
-      var scale = 0.5 + rnd() * 0.4;
+      var offsetY = 3.15 + (rnd() - 0.5) * 2 * 0.85;
+      var scale = 0.36 + rnd() * 0.3; // smaller clumps than before (was 0.5-0.9)
       // Independent per-axis scale (0.8-1.3x each) so every lobe is a lopsided, irregular clump
       // rather than a scaled-uniform icosahedron -- breaks the "perfect blob" geometric look.
       var lcx = 0.8 + rnd() * 0.5, lcz = 0.8 + rnd() * 0.5;
@@ -132,16 +144,31 @@ window.buildScenery = function (THREE, mats, H) {
         r: [rnd() * PI, rnd() * PI, rnd() * PI],
         s: [scale * lcx, scale * (0.75 + rnd() * 0.3), scale * lcz]
       });
+      // A branch reaching from the trunk top to just under this clump (skip the odd tallest lobe
+      // so a bit of canopy still floats free of visible woodwork, as real crowns do).
+      if (j < 3) {
+        var bdx = offsetX - tree.x, bdy = (offsetY - 0.3 * scale) - trunkTopY, bdz = offsetZ - tree.z;
+        var blen = Math.sqrt(bdx * bdx + bdy * bdy + bdz * bdz) || 0.001;
+        var bnx = bdx / blen, bny = bdy / blen, bnz = bdz / blen;
+        var bPitch = Math.asin(Math.max(-1, Math.min(1, bnz)));
+        var bYaw = Math.atan2(-bnx, bny);
+        branchT.push({
+          p: [tree.x + bnx * blen * 0.5, trunkTopY + bny * blen * 0.5, tree.z + bnz * blen * 0.5],
+          r: [bPitch, 0, bYaw],
+          s: [1, blen, 1]
+        });
+      }
     }
     // A central anchor lobe so the crown still reads as one tree, not just a ring of blobs.
     var acx = 0.85 + rnd() * 0.4, acz = 0.85 + rnd() * 0.4;
     oliveCanopyTransforms.push({
-      p: [tree.x, 3.0 + (rnd() - 0.5), tree.z],
+      p: [tree.x, 3.05 + (rnd() - 0.5), tree.z],
       r: [rnd() * PI, rnd() * PI, rnd() * PI],
-      s: [0.85 * acx, 0.65, 0.85 * acz]
+      s: [0.58 * acx, 0.46, 0.58 * acz]
     });
   }
-  group.add(H.instance(new THREE.IcosahedronGeometry(1.7, 0), mats.foliageOlive, oliveCanopyTransforms));
+  group.add(H.instance(branchGeo, mats.trunk, branchT));
+  group.add(H.instance(new THREE.IcosahedronGeometry(1.55, 0), mats.foliageOlive, oliveCanopyTransforms));
 
   // Cypresses live in 08-southslope, which drops them onto the carved rock apron
 
