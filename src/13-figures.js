@@ -131,6 +131,11 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var span = opts.span || 1;
     var lean = opts.lean;
     var bulge = opts.bulge;
+    // crispMin: raises the floor of the crease "crispness" mix (see below) so folds
+    // read as sharp angular creases more often instead of soft undulations — used
+    // for heavy wool peplos (caryatids) where the director asked for deep flutes
+    // with sharp crests. 0 (default) leaves every existing caller's look untouched.
+    var crispMin = opts.crispMin || 0;
     var seed = opts.seed || 1;
     // subtle high-frequency surface variation so lathed skin doesn't read as a perfectly smooth
     // plastic taper at shoulder/hip/waist transitions; small amplitude, non-integer-multiple
@@ -163,7 +168,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
       // blend a sharp "tent" crease with a soft sinusoid, the mix itself varying
       // by angle/seed, so some ridges catch light as crisp creases and others as
       // shallow, softly-shadowed undulations rather than every fold looking alike.
-      var crispness = 0.5 + 0.5 * sin(1.1 * theta + irregPhaseC);
+      var crispness = Math.max(crispMin, 0.5 + 0.5 * sin(1.1 * theta + irregPhaseC));
       var foldShape = crispness * triWave(vFoldCount * theta + phase + phaseDrift) + (1 - crispness) * sin(vFoldCount * theta + phase + phaseDrift);
       var fold = 1 + vFold * bias * ampMod * foldShape
         + catAmp * ampMod * sin(catFreq * yFrac * PI * 2 + 2.6 * sin(theta + phase))
@@ -235,7 +240,17 @@ window.addFigureHelpers = function (THREE, mats, H) {
       push += 0.04 * size * gaussFall(ny + 0.34, 0.05) * gaussFall(nx, 0.17) * front;
       push += 0.13 * size * gaussFall(ny + 0.44, 0.16) * front;               // chin
       var jawPull = (ny < -0.05 && ny > -0.55) ? 0.055 * size * gaussFall(ny + 0.26, 0.24) * Math.max(0, abs(nx) - 0.28) : 0;
-      var r = d + push - jawPull;
+      // hair, sculpted directly into the head sphere (no extra triangles): a modest
+      // volume over the crown/back (nz < 0, i.e. away from the face) plus a shallow
+      // hairline groove where it meets the forehead, so a head reads as "hair + face"
+      // rather than a bald dome even where a separate hair shell would clip into
+      // something resting on the head (a capital, a helmet). hairBack scales the
+      // effect per caller (0 = none, >1 = heavier, as for a caryatid's coiffure).
+      var hairBack = opts.hairBack !== undefined ? opts.hairBack : 1;
+      var backAmt = Math.max(0, -nz);
+      var hairVol = hairBack * 0.065 * size * backAmt * Math.max(0, ny + 0.05);
+      var hairLine = hairBack * 0.022 * size * gaussFall(ny - 0.50, 0.06) * (1 - front);
+      var r = d + push - jawPull + hairVol - hairLine;
       arr[i] = nx * r; arr[i + 1] = ny * r; arr[i + 2] = nz * r;
     }
     pos.needsUpdate = true;
@@ -386,14 +401,42 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // headSize is the head sphere's radius, so a ~1-head-unit crown-to-chin diameter is
     // 2*headSize =~ height/7.5, i.e. headSize =~ height/15.
     var ankleY = 0.065 * height, kneeY = 0.205 * height, hipY = 0.467 * height,
-      shoulderY = 0.80 * height, neckBaseY = 0.865 * height, headSize = 0.041 * height;
+      shoulderY = 0.80 * height, neckBaseY = 0.865 * height, headSize = 0.044 * height;
     var headTopY = height;
 
-    var rHem = 0.075 * height, rCalf = 0.062 * height, rKnee = 0.052 * height, rHip = 0.100 * height,
-      rWaist = 0.078 * height, rChest = 0.100 * height, rShoulder = 0.112 * height, rNeck = 0.044 * height;
+    // Director's r2 review ("massive and draped... heavy bodies"): the Parthenon
+    // pediment marbles are over-life-size and thickset — the previous radii
+    // (tuned for a slim votive figure) made every statue look like a thin
+    // mannequin regardless of pose. ~14% broader through torso/hips by default
+    // (bodyBulk = 1); legs/waist keep more of a taper so the extra mass reads at
+    // the chest/shoulders, not as a uniform bloat. bodyBulk: 0 (Promachos, whose
+    // silhouette the director already signed off on) keeps the original slim
+    // proportions untouched.
+    // Director's r1 review (minor: bulk still doesn't read as "massive" at scene
+    // distance): the bulked targets below gave chest/shoulder/hip only ~14-16%
+    // over the slim base radii. Pushed to ~18-20% and, per the director's note
+    // that mass was concentrated at the chest/shoulders, raised the lower-leg
+    // (calf/knee) targets too so the extra bulk distributes down the whole body
+    // instead of just the torso.
+    var bodyBulk = opts.bodyBulk !== undefined ? opts.bodyBulk : 1;
+    function bulkR(base, bulked) { return (base + bodyBulk * (bulked - base)) * height; }
+    var rHem = bulkR(0.075, 0.079), rCalf = bulkR(0.062, 0.070), rKnee = bulkR(0.052, 0.062),
+      rHip = bulkR(0.100, 0.119), rWaist = bulkR(0.078, 0.091), rChest = bulkR(0.100, 0.119),
+      rShoulder = bulkR(0.112, 0.133), rNeck = bulkR(0.044, 0.047);
 
     var contrapposto = opts.contrapposto !== false;
-    var weightSide = opts.weightSide || 1; // +1 = weight on figure's right leg (their -x side)
+    // Director's r1 review (majors: pediment figures lack per-slot pose variety):
+    // true seated/reclining/striding slot poses require changing H.makePediment's
+    // slot-assignment logic in 02-helpers.js, outside this module's ownership
+    // (src/13-figures.js only). Within this file's own reach, every unseeded
+    // caller (all of H.makePediment's 'stand'/'kneel'/'recline' figures) was
+    // still defaulting to the exact same weightSide=1 — identical contrapposto
+    // lean, identical weight-bearing arm, identical fold bias on every figure.
+    // Auto-alternating it per seed (still fully deterministic, no runtime RNG)
+    // gives real mirrored-stance variety across a pediment row at zero extra
+    // triangle cost. Explicit callers (e.g. the Promachos, which wants a
+    // specific known-good stance) are unaffected.
+    var weightSide = opts.weightSide !== undefined ? opts.weightSide : (rnd() < 0.5 ? 1 : -1);
     function lean(yFrac) {
       if (!contrapposto) return { x: 0, twist: 0 };
       var s = yFrac;
@@ -401,6 +444,23 @@ window.addFigureHelpers = function (THREE, mats, H) {
         x: weightSide * height * leanScale * (0.016 * sin(PI * s) + 0.008 * sin(2 * PI * s)),
         twist: weightSide * 0.09 * leanScale * sin(PI * s)
       };
+    }
+
+    // Free-leg knee push: about half of standing figures (deterministic per seed)
+    // get the free (non-weight-bearing) leg's knee pressing forward through the
+    // drape, exactly like the caryatid's bent leg — a cheap (no extra triangles,
+    // pure vertex displacement) way to break up the "row of identical mannequins"
+    // silhouette with real pose variety (a striding/mid-step read) instead of
+    // every figure standing perfectly frontal.
+    var hasKneePush = opts.kneePush !== undefined ? opts.kneePush : (rnd() < 0.5);
+    var kneePushSide = -weightSide; // the free leg is opposite the weight-bearing one
+    function stanceBulge(theta, yFrac) {
+      if (!hasKneePush) return 0;
+      var kneeFrac = kneeY / neckBaseY;
+      var thetaFree = kneePushSide > 0 ? 0 : PI;
+      var nearKnee = gaussFall(yFrac - kneeFrac, 0.11);
+      var nearTheta = gaussFall(((theta - thetaFree + PI) % (2 * PI)) - PI, 0.85);
+      return 0.05 * height * nearKnee * nearTheta;
     }
 
     var profile = [
@@ -415,11 +475,24 @@ window.addFigureHelpers = function (THREE, mats, H) {
       new THREE.Vector2(rShoulder, shoulderY),
       new THREE.Vector2(rNeck, neckBaseY)
     ];
+    // Director's r1 review (major: Promachos silhouette compromised by the
+    // shared standing-figure crispMin/catAmp): both are now caller-overridable
+    // (default unchanged, 0.30 / 0.09) so the Promachos alone can dial back the
+    // angular crease bias and large-scale swag that were breaking up her
+    // previously-approved clean silhouette, without softening every other
+    // standing/pediment figure's drapery.
+    var stanceCrispMin = opts.crispMin !== undefined ? opts.crispMin : 0.30;
+    var catAmpBase = opts.catAmpBase !== undefined ? opts.catAmpBase : 0.09;
     var body = foldedLathe(profile, {
-      material: mat, seed: seed, span: neckBaseY, lean: lean, radial: bodyRadial,
-      // Director's r1 review: fold amplitude/count were too shallow/sparse to
-      // read as drapery at all (0.15 depth, 16 ridges) — deepened and densified.
-      vFoldCount: 20, vFold: 0.23 * foldScale, catAmp: 0.09 * foldScale, catFreq: 2.2,
+      material: mat, seed: seed, span: neckBaseY, lean: lean, radial: bodyRadial, bulge: stanceBulge,
+      // Director's r1/r2 review: fold amplitude/count were too shallow/sparse to
+      // read as drapery at all — deepened a little further and biased toward
+      // sharper creases (crispMin) for "heavy body, heavy draped cloth" rather
+      // than a thin sheet. catAmp (the large-scale swag) is left at its r1 value:
+      // it scales with `foldScale`, and callers that push foldScale hard (the
+      // Promachos, 2x+) turned a bigger catAmp into a swollen, deformed torso
+      // rather than visible drapery relief.
+      vFoldCount: 22, vFold: 0.25 * foldScale, catAmp: catAmpBase * foldScale, catFreq: 2.2, crispMin: stanceCrispMin,
       vFoldBiasTheta: weightSide > 0 ? PI * 0.15 : PI * 1.15, vFoldBiasAmt: 0.5
     });
     group.add(body);
@@ -483,15 +556,27 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var neck = taperedLimb(new THREE.Vector3(lean(neckBaseY / neckBaseY).x, neckBaseY, 0), new THREE.Vector3(lean(1).x, neckBaseY + 0.045 * height, 0), rNeck, rNeck * 0.9, neckSeg, mat);
     group.add(neck);
 
-    var headGroup = makeHead(headSize, { material: mat, hairMaterial: opts.hairMaterial || mat, lowRes: LOD, hair: !LOD });
+    // Authentic breakage, head: surviving pediment marbles frequently lost the
+    // head entirely (falling from a raking cornice does that) — about 1 in 8
+    // standing figures loses theirs to a weathered stump instead of a carved
+    // face, alongside the arm breakage above. Disabled for statues whose head
+    // is load-bearing for other geometry (Promachos's helmet, any caller that
+    // explicitly opts out).
+    var headBreak = (opts.headBreak !== false) && rnd() < 0.125;
     var headLean = lean(1);
-    headGroup.position.set(headLean.x, neckBaseY + 0.045 * height + headSize * 0.95, headLean.z || 0);
-    // Heads turned off-axis break up the "row of identical mannequins" look —
-    // deterministic per seed, and skippable (headTurn: 0) for statues like the
-    // Promachos whose helmet geometry assumes a forward-facing head.
-    var headTurnRange = opts.headTurn !== undefined ? opts.headTurn : 0.9;
-    headGroup.rotation.y = (rnd() - 0.5) * headTurnRange;
-    group.add(headGroup);
+    var headPos = new THREE.Vector3(headLean.x, neckBaseY + 0.045 * height + headSize * 0.95, headLean.z || 0);
+    if (headBreak) {
+      group.add(brokenStump(headPos, rNeck * 0.9, seed + 404, mat));
+    } else {
+      var headGroup = makeHead(headSize, { material: mat, hairMaterial: opts.hairMaterial || mat, lowRes: LOD, hair: !LOD });
+      headGroup.position.copy(headPos);
+      // Heads turned off-axis break up the "row of identical mannequins" look —
+      // deterministic per seed, and skippable (headTurn: 0) for statues like the
+      // Promachos whose helmet geometry assumes a forward-facing head.
+      var headTurnRange = opts.headTurn !== undefined ? opts.headTurn : 0.9;
+      headGroup.rotation.y = (rnd() - 0.5) * headTurnRange;
+      group.add(headGroup);
+    }
 
     return { group: group, hipY: hipY, shoulderY: shoulderY, headTopY: headTopY, maxR: Math.max(rShoulder, rHip), headSize: headSize };
   }
@@ -658,7 +743,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
 
     var shoulderY = 0.775 * height;
     var neckBaseY = 0.815 * height;
-    var headSize = 0.084 * height;
+    var headSize = 0.090 * height;
     // alternate which leg bears the weight, mirroring the real porch's arrangement
     var supportSide = (callIdx % 2 === 0) ? 1 : -1;
 
@@ -668,7 +753,11 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // to visually carry an entablature. Widened the shoulder/chest, kept the
     // waist relatively slim so it still nips in above the hip for a readable
     // torso shape instead of a uniform tube.
-    var rBase = 0.188, rCalf = 0.176, rKnee = 0.188, rHip = 0.228, rWaist = 0.185, rChest = 0.236, rShoulder = 0.238, rNeck = 0.096;
+    // Director's r3 review ("still reads as blocky pegs"): another ~5% of body
+    // volume on top of that, and the waist held (not grown) so it nips in more
+    // clearly against the now-fuller hip/chest — a woman's silhouette, not a
+    // uniformly thick column.
+    var rBase = 0.196, rCalf = 0.184, rKnee = 0.196, rHip = 0.240, rWaist = 0.188, rChest = 0.248, rShoulder = 0.250, rNeck = 0.098;
     var profile = [
       new THREE.Vector2(rBase, plinthH),
       new THREE.Vector2(rCalf, 0.14 * height),
@@ -681,15 +770,21 @@ window.addFigureHelpers = function (THREE, mats, H) {
       new THREE.Vector2(rNeck, neckBaseY)
     ];
     var body = foldedLathe(profile, {
-      material: mat, seed: seed, span: neckBaseY, radial: MOBILE ? 12 : 24,
-      // Director's r1 review: peplos still read smooth — deepened the fold
-      // amplitude/count and the catenary swag further for heavy, sculptural
-      // vertical folds (real korai drapery is thick wool, not a thin sheet).
-      vFold: 0.30, vFoldCount: 21, vFoldBiasTheta: supportSide > 0 ? 0 : PI, vFoldBiasAmt: 0.8,
-      catAmp: 0.13, catFreq: 3,
-      // the free leg's bent knee presses through the drapery as a localized bulge, and a seam
-      // running knee-to-ankle where the fabric is drawn tight over the shin — this is what
-      // differentiates the free leg's drape from the straight support leg's vertical folds.
+      material: mat, seed: seed, span: neckBaseY,
+      // Director's r3 review ("smooth LatheGeometry... 32+ radial segments"):
+      // bumped from 24 to 32 on desktop for genuinely smooth shoulder/hip curves.
+      radial: MOBILE ? 14 : 32,
+      // Director's r1/r3 review: peplos still read smooth/blocky — deepened the
+      // fold amplitude/count further and biased toward sharp angular creases
+      // (crispMin) for real "deep flutes with sharp crests" rather than a soft
+      // sinusoidal ripple.
+      vFold: 0.34, vFoldCount: 24, vFoldBiasTheta: supportSide > 0 ? 0 : PI, vFoldBiasAmt: 0.8,
+      catAmp: 0.14, catFreq: 3, crispMin: 0.55,
+      // the free leg's bent knee presses through the drapery as a localized bulge, a seam
+      // running knee-to-ankle where the fabric is drawn tight over the shin (differentiates
+      // the free leg's drape from the straight support leg's vertical folds), and a pair of
+      // frontal bust bulges at chest height so the peplos reads as worn over a womanly torso
+      // rather than a uniform cylinder (director's r3 review: "rounded... bust").
       bulge: function (theta, yFrac) {
         var kneeFrac = 0.28 * height / neckBaseY;
         var ankleFrac = 0.09 * height / neckBaseY;
@@ -704,7 +799,22 @@ window.addFigureHelpers = function (THREE, mats, H) {
         var seamFall = gaussFall(((theta - seamTheta + PI) % (2 * PI)) - PI, 0.16);
         var seamPull = -0.026 * height * seamProfile * seamFall;
 
-        return kneeBulge + seamPull;
+        // bust: front is -z (theta = -PI/2 in this module's convention), two lobes
+        // straddling the centreline at chest height.
+        // Director's r1 review (minor: bust undersized, silhouette still
+        // somewhat columnar): magnitude raised 0.040 -> 0.052x height and the
+        // angular falloff tightened 0.26 -> 0.20 so each lobe reads as a
+        // sharper, more clearly separated curve rather than a broad soft swell.
+        var chestFrac = (shoulderY * 0.90) / neckBaseY;
+        var bustFall = gaussFall(yFrac - chestFrac, 0.045);
+        var bust = 0;
+        for (var bSide = -1; bSide <= 1; bSide += 2) {
+          var bustTheta = -PI / 2 + bSide * 0.30;
+          var nearBustTheta = gaussFall(((theta - bustTheta + PI) % (2 * PI)) - PI, 0.20);
+          bust += 0.052 * height * bustFall * nearBustTheta;
+        }
+
+        return kneeBulge + seamPull + bust;
       }
     });
     group.add(body);
@@ -718,7 +828,12 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var neck = taperedLimb(new THREE.Vector3(0, neckBaseY, 0), new THREE.Vector3(0, neckBaseY + 0.035 * height, 0), rNeck, rNeck * 0.95, MOBILE ? 8 : 10, mat);
     group.add(neck);
 
-    var headGroup = makeHead(headSize, { material: mat, hair: false });
+    // hair:false — a full hair shell would poke through the echinus/abacus
+    // resting directly on the crown (see the capital below); hairBack instead
+    // sculpts hair volume/hairline straight into the head sphere itself (no
+    // extra geometry, so nothing can clip), pushed harder than the default for
+    // a heavier coiffure to match the heavy braids down the back.
+    var headGroup = makeHead(headSize, { material: mat, hair: false, hairBack: 2.2 });
     var headY = neckBaseY + 0.035 * height + headSize * 0.9;
     headGroup.position.y = headY;
     // a small per-figure head turn so the row doesn't read as identical pegs
@@ -734,28 +849,34 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var braidTop = new THREE.Vector3(0, headY + headSize * 0.05, headSize * 0.90);
     for (var bi = -1; bi <= 1; bi += 2) {
       var top = braidTop.clone(); top.x = bi * headSize * 0.38;
-      var braid = buildBraid(top, new THREE.Vector3(0, -1, 0.05), shoulderY - headY + headSize * 1.3, headSize * 0.40, headSize * 0.11, MOBILE ? 8 : 15, seed + bi, mat);
+      var braid = buildBraid(top, new THREE.Vector3(0, -1, 0.05), shoulderY - headY + headSize * 1.3, headSize * 0.46, headSize * 0.13, MOBILE ? 8 : 15, seed + bi, mat);
       group.add(braid);
     }
 
     // capital: a heavy, cushion-like echinus (fuller curve, taller) + abacus (kalathos)
-    // resting on the head, top of abacus == height
-    var abacusH = 0.06 * height, echinusH = 0.065 * height;
+    // resting on the head, top of abacus == height.
+    // Director's r3 review ("flat hat" reading): the echinus curve was too shallow
+    // and the abacus too thin relative to the head below to read as a cushion +
+    // slab rather than a single flat disc — both grown and the echinus profile
+    // given a rounder, more bulbous swell (an extra control point) so the two
+    // parts read as distinct stacked shapes even in silhouette.
+    var abacusH = 0.075 * height, echinusH = 0.085 * height;
     var kalathosTop = height;
     var echinusY = kalathosTop - abacusH - echinusH / 2;
     var echinusProfile = [
-      new THREE.Vector2(headSize * 1.15, 0),
-      new THREE.Vector2(headSize * 1.48, echinusH * 0.32),
-      new THREE.Vector2(headSize * 1.68, echinusH * 0.68),
-      new THREE.Vector2(headSize * 1.62, echinusH)
+      new THREE.Vector2(headSize * 1.18, 0),
+      new THREE.Vector2(headSize * 1.55, echinusH * 0.22),
+      new THREE.Vector2(headSize * 1.88, echinusH * 0.52),
+      new THREE.Vector2(headSize * 1.95, echinusH * 0.76),
+      new THREE.Vector2(headSize * 1.78, echinusH)
     ];
     var echinus = foldedLathe(echinusProfile, {
-      material: mats.marble, seed: seed + 5, span: echinusH, radial: MOBILE ? 12 : 20,
+      material: mats.marble, seed: seed + 5, span: echinusH, radial: MOBILE ? 14 : 24,
       vFold: 0.30, vFoldCount: 12, catAmp: 0, micro: 0
     });
     echinus.position.y = echinusY - echinusH / 2;
     group.add(echinus);
-    var abacus = new THREE.Mesh(new THREE.BoxGeometry(headSize * 3.5, abacusH, headSize * 3.5), mats.marble);
+    var abacus = new THREE.Mesh(new THREE.BoxGeometry(headSize * 3.9, abacusH, headSize * 3.9), mats.marble);
     abacus.position.y = kalathosTop - abacusH / 2;
     abacus.castShadow = true; abacus.receiveShadow = true;
     group.add(abacus);
@@ -944,7 +1065,21 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // dark blob rather than a clean silhouette. foldScale/leanScale exaggerate the
     // peplos folds and the contrapposto lean so the bronze reads as a shaped figure
     // — not flat color — even under the patina's dark, uneven material.
-    var built = buildStandingBody(height, mat, seed, { weightSide: 1, sash: true, arms: false, foldScale: 2.1, leanScale: 1.3, headTurn: 0 });
+    // Director's r3 review: good silhouette (keep it — bodyBulk: 0 opts out of
+    // the heavier pediment-figure proportions below), wants more drapery fold
+    // relief and a more readable crest — foldScale nudged up (2.1 -> 2.3; a
+    // bigger push here also inflates catAmp, the large-scale swag, and starts
+    // reading as a swollen torso rather than fold relief) — and headBreak
+    // disabled (a civic cult statue keeps her head; the helmet below assumes it).
+    // Director's r1 review (major): at foldScale 2.3 the shared standing-figure
+    // crispMin (0.30, tuned for heavy wool peplos on pediment/caryatid figures)
+    // broke the previously-approved clean silhouette into an overly angular
+    // faceted texture. Dropped to 0.15 for the Promachos alone so folds still
+    // read but stay smooth in silhouette; catAmpBase trimmed 0.09 -> 0.08 too
+    // (director's minor: probe for more fold relief without reintroducing the
+    // torso bloat a bigger catAmp caused at this foldScale — a modest reduction
+    // keeps the swag in the safe range already verified against the reference).
+    var built = buildStandingBody(height, mat, seed, { weightSide: 1, sash: true, arms: false, foldScale: 2.3, leanScale: 1.3, headTurn: 0, headBreak: false, bodyBulk: 0, kneePush: false, crispMin: 0.15, catAmpBase: 0.08 });
     var statue = built.group;
     statue.position.y = plinthH;
     group.add(statue);
@@ -1015,13 +1150,16 @@ window.addFigureHelpers = function (THREE, mats, H) {
     group.add(browBand);
     // crest: a row of adjoining vertical slabs whose tops trace a smooth high arc
     // (nape to brow), reading as one continuous crest from any angle.
-    var crestN = MOBILE ? 7 : 13, crestPeak = helmR * 1.55, crestLen = helmR * 2.5, crestBaseY = helmCenterY + helmR * 0.52;
+    // Director's r3 review: crest read as a low stubby mohawk — raised the peak
+    // (1.55 -> 1.95x helmR) and thickened each fin (0.11 -> 0.14x helmR) for a
+    // bolder, more legible silhouette from a distance.
+    var crestN = MOBILE ? 7 : 13, crestPeak = helmR * 1.95, crestLen = helmR * 2.5, crestBaseY = helmCenterY + helmR * 0.52;
     var crestSlabD = (crestLen / crestN) * 1.2;
     for (var ci = 0; ci < crestN; ci++) {
       var ct = ci / (crestN - 1);
       var archZ = (ct - 0.5) * crestLen;
       var segH = Math.max(helmR * 0.14, crestPeak * Math.pow(sin(ct * PI), 0.65));
-      var fin = new THREE.Mesh(new THREE.BoxGeometry(helmR * 0.11, segH, crestSlabD), mat);
+      var fin = new THREE.Mesh(new THREE.BoxGeometry(helmR * 0.14, segH, crestSlabD), mat);
       fin.position.set(0, crestBaseY + segH / 2, archZ);
       fin.castShadow = true; fin.receiveShadow = true;
       group.add(fin);
