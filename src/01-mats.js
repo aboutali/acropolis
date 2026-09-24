@@ -188,7 +188,7 @@ window.buildMats = function (THREE) {
   if (!HAS_DOC) {
     function flat(hex, rough, metal) { return new THREE.MeshStandardMaterial({ color: hex, roughness: rough, metalness: metal || 0 }); }
     mats.marble = flat(0xe9decc, 0.72); mats.marbleWorn = flat(0xd6c9ac, 0.85); mats.marbleShadowed = flat(0xc4b89c, 0.88);
-    mats.rock = flat(0xa2957a, 0.95); mats.rockDark = flat(0x7d735f, 0.97); mats.ground = flat(0xb2a896, 0.98);
+    mats.rock = flat(0xa8a08f, 0.95); mats.rockDark = flat(0x8a8272, 0.97); mats.ground = flat(0xaca595, 0.98);
     mats.city = flat(0xcfc4ab, 0.9); mats.terracotta = flat(0xa05f46, 0.75); mats.bronze = flat(0x63503a, 0.4, 0.9);
     mats.foliageOlive = flat(0x6e7b57, 0.95); mats.foliageCypress = flat(0x38492f, 0.95); mats.trunk = flat(0x584634, 0.95);
     mats.marbleStatue = flat(0xe9e0c8, 0.5); mats.marbleRelief = flat(0xd6c9ac, 0.85); mats.bronzePatina = flat(0x5a7869, 0.7, 0.5);
@@ -305,7 +305,15 @@ window.buildMats = function (THREE) {
     var height = new Float32Array(res * res);
     var rough = new Float32Array(res * res);
     var x, y;
-    var stone = [176, 158, 122], band = [140, 124, 94], crack = [86, 76, 62], lichen = [134, 146, 88];
+    // realism3 art-director fix: r1/r2 left this tan/khaki (176,158,122 stone / 140,124,94 band)
+    // -- fine at cliff scale under override uvScale=220 (broad soft gradient), but the SAME field
+    // is also sampled at native uvScale=8 for the perimeter walls (07-walls.js) and other small
+    // ashlar objects, where the sine-driven bandMask completes close to one full light/dark cycle
+    // per object -- combined with that tan-vs-dark-tan contrast it read as brown horizontal
+    // wood-grain planking rather than stone. Desaturated toward pale grey-ochre limestone (much
+    // smaller stone/band spread: 26 vs the old 54) so the same texture reads as mottled ashlar at
+    // both scales instead of striped boards.
+    var stone = [168, 160, 143], band = [139, 131, 114], crack = [80, 73, 62], lichen = [122, 133, 87];
     // Fixed seeded phase offsets for the multi-frequency strata sines (deterministic hash, no RNG).
     var hp1 = hashP(1, 3, seed + 11, 97, 97) * 6.28318;
     var hp2 = hashP(5, 2, seed + 12, 97, 97) * 6.28318;
@@ -347,7 +355,12 @@ window.buildMats = function (THREE) {
         var grain = fbmTile(u, v, seed + 55, 16, 16, 3, 0.5);
         height[i] = clamp01(0.5 + (bandMask - 0.5) * 0.45 + (grain - 0.5) * 0.4 - crackMask * 0.5 - jointMask * 0.5 - bandEdge * 0.4);
         rough[i] = clamp01(0.85 + crackMask * 0.1 + jointMask * 0.06 - lichenMask * 0.06 + (grain - 0.5) * 0.06);
-        var c = lerpC(stone, band, bandMask * 0.65);
+        // realism3: bandMask weight eased from 0.65 -> 0.4 so the horizontal strata read as a soft
+        // tonal shift (real bedding planes) rather than a hard-edged stripe -- the wood-pallet look
+        // was as much this contrast as the old tan hue. Cliffs (override uvScale=220) still read
+        // clearly stratified since the shadow-carrying jointMask/crackMask/bandEdge terms below are
+        // untouched; only the flat colour swing between courses is softened.
+        var c = lerpC(stone, band, bandMask * 0.4);
         c = lerpC(c, crack, crackMask * 0.55);
         c = lerpC(c, crack, jointMask * 0.35);
         c = lerpC(c, lichen, lichenMask);
@@ -378,7 +391,17 @@ window.buildMats = function (THREE) {
   mats.rock = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: rk.map, normalMap: rk.normalMap, roughnessMap: rk.roughnessMap, normalScale: new THREE.Vector2(1.1, 1.1) });
   var rkd = paintRockVariant(rockField, 0.66, 0.04, 22);
   mats.rockDark = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: rkd.map, normalMap: rkd.normalMap, roughnessMap: rkd.roughnessMap, normalScale: new THREE.Vector2(1.1, 1.1) });
-  addGroundGrime(mats.rock); addGroundGrime(mats.rockDark);
+  // realism3: addGroundGrime's docstring is explicit that it only reads correctly on pieces
+  // "authored with its own y=0 at its base" (H.makeSteppedBase/makeEntablature/... -- the marble
+  // family). rock/rockDark are instead consumed largely through H.instance() with a plain centered
+  // BoxGeometry(1,1,1) (07-walls.js's ashlar courses, H.makeWall, the south-slope back walls) whose
+  // LOCAL vertex Y always sits in [-0.5, 0.5] no matter which course it is or how high the wall
+  // actually stands. That constant "at grade" reading pushed every single course toward the same
+  // brown grimeColor mix (~21-42%), flattening the whole wall to one uniform muddy brown regardless
+  // of height -- the main reason it read as stacked wood planking rather than coursed stone. Rock's
+  // own painted texture (genRockField's crack/joint/lichen terms above) already carries plenty of
+  // weathering, so the extra vertex-based grime pass is simply dropped for this family rather than
+  // left mis-firing on every non-y0-based consumer.
 
   // =================================================================
   // GROUND: dry Attic soil, pebbles, sparse dry grass flecks.
@@ -391,7 +414,12 @@ window.buildMats = function (THREE) {
     // can't touch the light from here, push the base palette further: nearly neutral R~=G~=B
     // (killing almost all of the remaining warm R-B bias) plus a small G/B lift so the residual
     // cast trends grey-blue rather than grey-beige-warm once the key light multiplies it.
-    var soil = [151, 153, 150], soilDark = [124, 127, 123], pebbleLt = [171, 173, 168], pebbleDk = [101, 103, 100], fleck = [144, 146, 141];
+    // realism3: r2 pushed this to a near-neutral grey-blue (151,153,150, G/B >= R) to fight the
+    // warm key light, but the art director's target is a warm dusty grey-beige (~175,168,155 in
+    // sun), not grey-blue -- nudged back to a gentle warm-grey bias (R slightly > G > B) while
+    // keeping the overall value and saturation low, so the sun's own warmth lands near the target
+    // instead of overshooting into yellow.
+    var soil = [151, 147, 137], soilDark = [123, 120, 111], pebbleLt = [170, 165, 152], pebbleDk = [100, 97, 90], fleck = [143, 139, 128];
     var x, y;
     for (y = 0; y < res; y++) {
       var v = (y + 0.5) / res;
@@ -655,7 +683,7 @@ window.buildMats = function (THREE) {
   // ---------------------------------------------------------------
   var UV_SCALE = {
     marble: 1.3, marbleWorn: 1.3, marbleShadowed: 1.4, marbleStatue: 0.9, marbleRelief: 1.3,
-    rock: 10, rockDark: 8, ground: 4, city: 4, terracotta: 1.4,
+    rock: 10, ground: 4, city: 4, terracotta: 1.4,
     bronze: 2, bronzePatina: 2, foliageOlive: 3, foliageCypress: 3, trunk: 1.1,
     gold: 1, ivory: 1.4, grass: 6, scrub: 4, plaster: 3,
   };
