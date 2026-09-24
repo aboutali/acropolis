@@ -18,6 +18,14 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // sheen and lets warm light bleed through thin edges (ears, fingers, drapery
     // hems) rather than reading as a hard, opaque, uniformly matte plaster.
     if (typeof matMarbleFig.roughness === 'number') matMarbleFig.roughness = Math.min(matMarbleFig.roughness, 0.86);
+    // Round-3 photo fix: this procedural material (the pre-scan fallback for
+    // every figure/caryatid slot, and what stays on-screen on mobile or if a
+    // scan fails to load) shares the same near-white .color-over-map setup as
+    // mats.marbleStatue and reads too bright/clean next to the weathered
+    // architecture for the same reason the scanned meshes do (see the
+    // matching tint in 14-assets.js's baseMaterial) -- tint it down to the
+    // same honey tone so the fallback matches the scan it's standing in for.
+    if (matMarbleFig.color) matMarbleFig.color.set(0xd6c9ac);
     matMarbleFig.onBeforeCompile = function (shader) {
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <dithering_fragment>',
@@ -956,6 +964,25 @@ window.addFigureHelpers = function (THREE, mats, H) {
     abacus.position.y = kalathosTop - abacusH / 2;
     abacus.castShadow = true; abacus.receiveShadow = true;
     group.add(abacus);
+
+    // Round-3 photo fix (v-cary): the porch entablature in 05-erechtheion.js
+    // is positioned from fixed numbers (podium top 1.8 + this function's own
+    // `height` contract, +0.05 clearance) independent of what this function
+    // actually returns, and the comparer found a visible gap between the
+    // capital top and the epistyle soffit plus the statues reading short next
+    // to the tall podium block. This file may not touch 05-erechtheion.js, so
+    // the fix has to live entirely here: scale the whole finished figure up
+    // ~12% about its own base (plinth bottom stays pinned at local y=0, so
+    // the placement call site is untouched) so the capital rises past the
+    // fixed +0.05 gap and a bit into the entablature's lowest fascia band --
+    // real Ionic capitals sit flush under the epistyle with no reveal, and
+    // the extra bulk also reads less undersized against the podium. Update
+    // userData.height to match so 14-assets.js scales the scanned-mesh
+    // replacement (which reads this, not this function's local geometry) by
+    // the same bumped amount instead of the original 2.3.
+    var GAP_FIX_SCALE = 1.12;
+    group.scale.setScalar(GAP_FIX_SCALE);
+    group.userData.height = height * GAP_FIX_SCALE;
 
     return group;
   };

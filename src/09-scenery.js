@@ -120,6 +120,27 @@ window.buildScenery = function (THREE, mats, H) {
   var branchGeo = new THREE.CylinderGeometry(0.05, 0.11, 1, 4, 1, true);
   var branchT = [];
 
+  // A second, per-vertex-jittered canopy geometry (same triangle cost as the plain icosahedron it
+  // sits alongside) so lobes don't all share one identical faceted "gem" silhouette from every
+  // angle -- alternated per lobe below, on top of the existing offset/scale/rotation variety.
+  var canopyGeoB = new THREE.IcosahedronGeometry(1.55, 0);
+  (function () {
+    var pos = canopyGeoB.attributes.position, arr = pos.array;
+    var jr = 811;
+    function jrnd() { jr = (jr * 1664525 + 1013904223) % 4294967296; return jr / 4294967296; }
+    for (var vi = 0; vi < arr.length; vi += 3) {
+      var vx = arr[vi], vy = arr[vi + 1], vz = arr[vi + 2];
+      var len = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1;
+      var j = 0.75 + 0.5 * jrnd();
+      arr[vi] = (vx / len) * len * j;
+      arr[vi + 1] = (vy / len) * len * j;
+      arr[vi + 2] = (vz / len) * len * j;
+    }
+    pos.needsUpdate = true;
+    canopyGeoB.computeVertexNormals();
+  })();
+  var oliveCanopyTransformsB = [];
+
   // Clumpy canopies: several smaller, more widely-spaced blobs per tree with visible gaps between
   // them (and the bare branch carrying each one visible beneath it), instead of a few large lobes
   // that merge into one smooth silhouette at a distance.
@@ -139,11 +160,14 @@ window.buildScenery = function (THREE, mats, H) {
       // Independent per-axis scale (0.8-1.3x each) so every lobe is a lopsided, irregular clump
       // rather than a scaled-uniform icosahedron -- breaks the "perfect blob" geometric look.
       var lcx = 0.8 + rnd() * 0.5, lcz = 0.8 + rnd() * 0.5;
-      oliveCanopyTransforms.push({
+      var lobeXf = {
         p: [offsetX, offsetY, offsetZ],
         r: [rnd() * PI, rnd() * PI, rnd() * PI],
         s: [scale * lcx, scale * (0.75 + rnd() * 0.3), scale * lcz]
-      });
+      };
+      // Alternate between the plain and jittered canopy geometry per lobe so a tree's crown mixes
+      // two silhouettes instead of repeating one identical faceted "gem" shape at every lobe.
+      (rnd() < 0.5 ? oliveCanopyTransforms : oliveCanopyTransformsB).push(lobeXf);
       // A branch reaching from the trunk top to just under this clump (skip the odd tallest lobe
       // so a bit of canopy still floats free of visible woodwork, as real crowns do).
       if (j < 3) {
@@ -169,6 +193,7 @@ window.buildScenery = function (THREE, mats, H) {
   }
   group.add(H.instance(branchGeo, mats.trunk, branchT));
   group.add(H.instance(new THREE.IcosahedronGeometry(1.55, 0), mats.foliageOlive, oliveCanopyTransforms));
+  if (oliveCanopyTransformsB.length) group.add(H.instance(canopyGeoB, mats.foliageOlive, oliveCanopyTransformsB));
 
   // Cypresses live in 08-southslope, which drops them onto the carved rock apron
 

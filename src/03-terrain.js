@@ -34,6 +34,22 @@ window.buildTerrain = function (THREE, mats, H) {
     var r = mult * (1 - 0.28 * streak);
     var g = mult * (1 - 0.11 * streak);
     var b = mult * (1 - 0.32 * streak);
+    if (vparams) {
+      // Every reference photo shows the slope below the short rock band reading as dense wooded/
+      // scrubby hillside, not more pale apron -- blend toward a darker olive-green tone with depth
+      // below the cliff band, strongest near the plain where the real pine/scrub cover is densest.
+      // Weighted hard toward the vegetation target (not a gentle blend): the scene's own warm
+      // key light multiplies every surface's lit colour, which washes out a subtler green tint
+      // almost entirely (confirmed by render -- a half-blended tan/olive still read as plain pale
+      // tan once lit). Pushing the target itself darker and more saturated, and the blend weight
+      // close to full replacement at high veg, is what actually survives that multiply and reads
+      // as dark wooded slope instead of sunlit rock.
+      var veg = clamp01((-vparams.y - (CLIFF_DROP + 1)) / 34);
+      var vr = 0.14, vg = 0.30, vb = 0.09;
+      r = r * (1 - veg * 0.88) + vr * veg * 0.88;
+      g = g * (1 - veg * 0.80) + vg * veg * 0.80;
+      b = b * (1 - veg * 0.90) + vb * veg * 0.90;
+    }
     return [clamp01(r), clamp01(g), clamp01(b)];
   }
   function paintVertexColors(geo, seed, cliffMode) {
@@ -211,10 +227,15 @@ window.buildTerrain = function (THREE, mats, H) {
   // ---------------- 2. Stratified limestone cliff + talus, blending into the hillside ----------------
   // Radial profile from the plateau edge (t=0, y=0) down to the plain (t=1, y=-80), per-angle.
   // All perturbation terms below are physical METRES added to the ellipse radius (then implicitly
-  // scaled by RX/RZ when applied to x/z) -- kept small so the face reads as broad, near-vertical
-  // limestone with a few ledges and fissures, not a crumpled, wedge-gouged ripple.
+  // scaled by RX/RZ when applied to x/z). Real Acropolis photos (Philopappou SW, Areopagus W,
+  // Museum S, the north banner) all show a SHORT (15-25m) irregular, broken rock band sitting atop
+  // a much longer steep-then-gentler wooded/scrubby slope running down to the city -- not one tall
+  // uniform drum -- so CLIFF_T (the radial fraction spent on the near-vertical band) is kept small
+  // and cliffY's own drop at t=CLIFF_T is fixed at a real ~20m, with the remaining ~60m of descent
+  // spread across the long talus/hillside slope below.
   var CX = -45, CZ = 0, RX = 150, RZ = 75;
-  var CLIFF_T = 0.5;
+  var CLIFF_T = 0.16;
+  var CLIFF_DROP = 20; // metres of near-vertical rock band (art-director spec: 15-25m)
   function cliffRadiusMul(t, a, seed) {
     // Horizontal strata ledges: broad, evenly-spaced courses with a rounded (smoothstepped) lip.
     var phase = H.noise2(cos(a) * 3, sin(a) * 3, seed + 40) * 0.9;
@@ -238,32 +259,50 @@ window.buildTerrain = function (THREE, mats, H) {
     var fissureGate = fissureMask > 0.5 ? smooth(clamp01((fissureMask - 0.5) / 0.22)) : 0;
     var fissure = fissureGate * fissureAmpM * sin(a * fissureFreq + seed) * (1 - t * 0.4) / RX;
     // Patchy, gentle bulges (read as a shallow overhang at a distance) -- a small mask-gated swell.
+    // Bounds scaled off CLIFF_T (not fixed metres) so this stays a mid-band feature now that the
+    // band itself is much shorter.
     var overhangMask = H.noise2(cos(a) * 11, sin(a) * 11, seed + 44);
-    var overhangM = (t > 0.08 && t < CLIFF_T - 0.02 && overhangMask > 0.3)
-      ? (overhangMask - 0.3) * 1.1 * sin((t - 0.08) / (CLIFF_T - 0.1) * PI)
+    var ohLo = CLIFF_T * 0.18, ohHi = CLIFF_T * 0.92;
+    var overhangM = (t > ohLo && t < ohHi && overhangMask > 0.3)
+      ? (overhangMask - 0.3) * 1.1 * sin((t - ohLo) / (ohHi - ohLo) * PI)
       : 0; // metres
     var overhang = overhangM / RX;
+    // Irregular inward notches: broken cliff faces aren't a smooth ellipse in plan -- real bands
+    // (Philopappou SW, Areopagus W) show sudden re-entrant breaks at a handful of angles where a
+    // chunk of the face has sheared away. Gated sparse per-angle so only a few notches appear
+    // around the perimeter, confined to (and fading at the top/bottom of) the vertical band.
+    var notchMask = H.noise2(cos(a) * 3.4, sin(a) * 3.4, seed + 49);
+    var notchGate = notchMask > 0.6 ? smooth(clamp01((notchMask - 0.6) / 0.18)) : 0;
+    var notchVert = smooth(clamp01(t / (CLIFF_T * 0.35))) * (1 - smooth(clamp01((t - CLIFF_T * 0.6) / (CLIFF_T * 0.4))));
+    var notchDepthM = notchGate * notchVert * (2.2 + 2.6 * H.noise2(cos(a) * 7.1, sin(a) * 7.1, seed + 50));
+    var notch = notchDepthM / RX;
     // Fine surface roughness, well under the strata scale.
     var microM = 0.09 * H.noise2(cos(a) * 22 + t * 16, sin(a) * 22, seed + 45); // metres
     var micro = microM / RX;
-    // Talus fan: the slope widens gently as it flares out to meet the plain.
-    var scree = t > CLIFF_T ? pow((t - CLIFF_T) / (1 - CLIFF_T), 1.3) * 0.85 : 0;
+    // Talus/hillside flare: the slope widens steadily as it runs out toward the plain, over the
+    // now much longer post-cliff distance.
+    var scree = t > CLIFF_T ? pow((t - CLIFF_T) / (1 - CLIFF_T), 1.15) * 1.3 : 0;
     // Broken-rock rubble bump-field right at the cliff foot: small irregular metre-scale bumps
     // (not a smooth flare) fading in just past the cliff base and fading back out over the talus.
     var taluBumpM = 0;
     if (t > CLIFF_T) {
       var bn = H.noise2(cos(a) * 15 + t * 40, sin(a) * 15, seed + 47);
       var fadeIn = smooth(clamp01((t - CLIFF_T) / 0.05));
-      var fadeOut = 1 - smooth(clamp01((t - (CLIFF_T + 0.22)) / 0.2));
+      var fadeOut = 1 - smooth(clamp01((t - (CLIFF_T + 0.12)) / 0.12));
       taluBumpM = (0.1 + 0.3 * (0.5 + 0.5 * bn)) * fadeIn * Math.max(0, fadeOut);
     }
     var taluBump = taluBumpM / RX;
-    return 1 + ledge + courseOffset + fissure + overhang + scree + micro + taluBump;
+    return 1 + ledge + courseOffset + fissure + overhang + scree + micro + taluBump - notch;
   }
+  // Short vertical rock band (CLIFF_DROP metres) down to y=-CLIFF_DROP, then a long steep-to-
+  // gentler wooded/scrubby slope (real Attic hillside, not more bare rock) running the rest of the
+  // way down to the plain at y=-80 -- steep just below the cliff foot, easing off as it nears the
+  // city, per the reference photos.
   function cliffY(t) {
-    if (t < CLIFF_T) return -t / CLIFF_T * 50;
+    if (t < CLIFF_T) return -t / CLIFF_T * CLIFF_DROP;
     var tt = (t - CLIFF_T) / (1 - CLIFF_T);
-    return -50 - (tt * tt * 0.55 + tt * 0.45) * 30;
+    var eased = 1 - pow(1 - tt, 1.6); // ease-out: steep right after the cliff foot, gentle near the plain
+    return -CLIFF_DROP - eased * (80 - CLIFF_DROP);
   }
   function ringGeometry(rings, radial, matSeedOffset) {
     var vertCount = (rings + 1) * radial;
@@ -320,6 +359,12 @@ window.buildTerrain = function (THREE, mats, H) {
   var gPos = groundGeo.attributes.position, gArr = gPos.array;
   var gCol = new Float32Array(gPos.count * 3);
   var gSoil = [0.62, 0.58, 0.49], gGreen = [0.42, 0.46, 0.32], gDry = [0.56, 0.48, 0.36];
+  // Real Athens seen from the hills stands on a grey asphalt/concrete carpet, not orange-tan sand:
+  // blend the ground plane toward a neutral grey wherever the city grid (section 4 below, same
+  // radius the "maxR" city extent uses) actually sits, fading back to natural soil/scrub beyond it
+  // so the open countryside past the city keeps its warm dusty colouring.
+  var gAsphalt = [0.32, 0.325, 0.33];
+  var CITY_GREY_R0 = 130, CITY_GREY_R1 = 210, CITY_GREY_MAX = 1350, CITY_GREY_FADE = 220;
   for (var gi = 0; gi < gArr.length; gi += 3) {
     var gx = gArr[gi], gz = gArr[gi + 2];
     var dxh = gx - CX, dzh = gz - CZ, distH = sqrt(dxh * dxh + dzh * dzh);
@@ -329,6 +374,11 @@ window.buildTerrain = function (THREE, mats, H) {
     var dry = clamp01(((fine + 1) * 0.5 - 0.5) * 0.7);
     var gc = mixC(gSoil, gGreen, green);
     gc = mixC(gc, gDry, dry);
+    var cityMask = smoothstep01(CITY_GREY_R0, CITY_GREY_R1, distH) * (1 - smoothstep01(CITY_GREY_MAX, CITY_GREY_MAX + CITY_GREY_FADE, distH));
+    if (cityMask > 0) {
+      var asphaltFine = 0.85 + 0.3 * H.noise2(gx * 0.01, gz * 0.011, 65);
+      gc = mixC(gc, [gAsphalt[0] * asphaltFine, gAsphalt[1] * asphaltFine, gAsphalt[2] * asphaltFine], cityMask * 0.9);
+    }
     gCol[gi] = gc[0]; gCol[gi + 1] = gc[1]; gCol[gi + 2] = gc[2];
     var rollFade = smoothstep01(1250, 2700, distH);
     var roll = 0.55 * H.noise2(gx * 0.0009, gz * 0.0011, 63) + 0.45 * H.noise2(gx * 0.0022, gz * 0.0019, 64);
@@ -348,11 +398,34 @@ window.buildTerrain = function (THREE, mats, H) {
   // previous instance counts. Both use cheap low-poly primitives (octahedron canopies/blobs
   // instead of icosahedra) so the coverage increase stays affordable -- at hillside viewing
   // distance the textured material reads the shape, not the facet count.
+  // Per-vertex directional jitter on a low-poly primitive: builds ONE fixed, deterministic
+  // irregular shape (not a per-instance effect -- InstancedMesh in r128 shares one geometry across
+  // all instances), so this gives boulders their own lumpy, weathered silhouette that reads as
+  // distinct from the smooth scaled icosahedra used for tree canopies, while per-instance
+  // rotation/scale (already present at each call site) keeps individual rocks from looking cloned.
+  function makeIrregularRock(radius, seed) {
+    var geo = new THREE.IcosahedronGeometry(radius, 0);
+    var pos = geo.attributes.position, arr = pos.array;
+    var rr = lcg(seed);
+    for (var vi = 0; vi < arr.length; vi += 3) {
+      var vx = arr[vi], vy = arr[vi + 1], vz = arr[vi + 2];
+      var len = sqrt(vx * vx + vy * vy + vz * vz) || 1;
+      var nx = vx / len, ny = vy / len, nz = vz / len;
+      var j = 0.68 + 0.6 * rr();
+      arr[vi] = nx * len * j;
+      arr[vi + 1] = ny * len * j * (0.8 + 0.35 * rr());
+      arr[vi + 2] = nz * len * j;
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    return geo;
+  }
   var hillR = lcg(140);
   var trunkGeo = new THREE.CylinderGeometry(0.14, 0.22, 2.6, 5);
   var pineGeo = new THREE.IcosahedronGeometry(1.7, 0);
+  var pineGeo2 = new THREE.IcosahedronGeometry(1.15, 0); // smaller secondary lobe, stacked offset
   var scrubGeo = new THREE.IcosahedronGeometry(0.6, 0);
-  var pineTrunkT = [], pineCanopyT = [], scrubT = [];
+  var pineTrunkT = [], pineCanopyT = [], pineCanopy2T = [], scrubT = [];
   // t is capped well short of 1 (unlike the boulder/rubble talus spray below, which fades out
   // anyway): at the higher counts here, even the previous build's occasional stragglers that
   // rode the talus's own noisy outer flare out toward the plain became numerous enough to read
@@ -362,7 +435,7 @@ window.buildTerrain = function (THREE, mats, H) {
   // greenbelt hugs the rock before the streets begin, not a hard cut from bare talus to houses.
   var pineCount = MOBILE ? 65 : 225;
   for (var p = 0; p < pineCount; p++) {
-    var pa = hillR() * PI * 2, pt = 0.32 + hillR() * 0.53;
+    var pa = hillR() * PI * 2, pt = (CLIFF_T + 0.02) + hillR() * (0.90 - CLIFF_T - 0.02);
     var m = cliffRadiusMul(pt, pa, 5);
     var px = CX + cos(pa) * RX * m, pz = CZ + sin(pa) * RZ * m, py = cliffY(pt);
     var psc = 0.55 + hillR() * 1.05; // wider height range -> more silhouette variation
@@ -372,10 +445,19 @@ window.buildTerrain = function (THREE, mats, H) {
     // solid, without adding any geometry.
     var pcx = 0.8 + hillR() * 0.5, pcz = 0.8 + hillR() * 0.5;
     pineCanopyT.push({ p: [px, py + 2.9 * psc, pz], r: [0, hillR() * PI * 2, 0], s: [psc * 1.1 * pcx, psc * (0.5 + hillR() * 0.25), psc * 1.1 * pcz] });
+    // Second, smaller lobe offset to one side and slightly lower: breaks the single-icosahedron
+    // "gem on a post" silhouette into an irregular two-lobe crown, matching the soft, uneven real
+    // pine/cypress canopies in the reference photos.
+    var loA2 = hillR() * PI * 2, loR2 = 0.55 * psc;
+    pineCanopy2T.push({
+      p: [px + cos(loA2) * loR2, py + 2.55 * psc + (hillR() - 0.3) * 0.5 * psc, pz + sin(loA2) * loR2],
+      r: [0, hillR() * PI * 2, 0],
+      s: [psc * (0.6 + hillR() * 0.35), psc * (0.45 + hillR() * 0.3), psc * (0.6 + hillR() * 0.35)]
+    });
   }
   var clusterCount = MOBILE ? 100 : 300;
   for (var sc = 0; sc < clusterCount; sc++) {
-    var sa = hillR() * PI * 2, st = 0.38 + hillR() * 0.48;
+    var sa = hillR() * PI * 2, st = (CLIFF_T + 0.02) + hillR() * (0.90 - CLIFF_T - 0.02);
     var sm = cliffRadiusMul(st, sa, 5);
     var sx = CX + cos(sa) * RX * sm, sz = CZ + sin(sa) * RZ * sm, sy = cliffY(st);
     var clumpN = 3 + ((hillR() * 4) | 0);
@@ -389,6 +471,7 @@ window.buildTerrain = function (THREE, mats, H) {
   }
   group.add(H.instance(trunkGeo, mats.trunk, pineTrunkT));
   group.add(H.instance(pineGeo, mats.foliageOlive, pineCanopyT));
+  group.add(H.instance(pineGeo2, mats.foliageOlive, pineCanopy2T));
   group.add(H.instance(scrubGeo, mats.scrub, scrubT));
 
   var taluR = lcg(271);
@@ -399,9 +482,11 @@ window.buildTerrain = function (THREE, mats, H) {
   }
   var taluBoulderMat = warmBrighten(mats.rockDark, 0.18, 0.14, 0.06);
   var taluRubbleMat = warmBrighten(mats.rock, 0.16, 0.13, 0.07);
-  // Detail-0 icosahedron (20 tris, half the cost of the previous detail-1 boulders) buys room for
-  // more boulders -- a broken-rock field reads through sheer count more than per-rock smoothness.
-  var boulderGeo = new THREE.IcosahedronGeometry(1, 0);
+  // Irregular jittered low-poly rock (still 20 tris, same cost as the plain detail-0 icosahedron it
+  // replaces) so boulders read as weathered broken rock, not the same "gem" primitive as the tree
+  // canopies above -- per-instance rotation/non-uniform scale below then keeps individual rocks
+  // from all looking like clones of the one master shape.
+  var boulderGeo = makeIrregularRock(1, 601);
   var boulderT = [];
   var boulderCount = MOBILE ? 12 : 22;
   for (var bo = 0; bo < boulderCount; bo++) {
@@ -530,10 +615,14 @@ window.buildTerrain = function (THREE, mats, H) {
   var parkGeo = new THREE.BoxGeometry(1, 1, 1);
   var cityTreeTrunkT = [], cityTreeCanopyT = [], parkT = [];
 
-  // Near/mid grid tightened considerably (denser roofscape, per the art pass) while the far tier
-  // is coarsened further to absorb the added cost within budget -- a distant LOD tier can afford
-  // to lose resolution the eye can't resolve anyway.
-  var cellNear = 15, cellMid = 25, cellFar = 100, cellTaper = cellFar * 1.2; // block cell size by ring (metres)
+  // Real Athens seen from the hills is a dense, continuous carpet of tightly packed blocks with
+  // only street-width gaps, not individually-spaced boxes -- lot spacing tightened at every LOD
+  // tier so gaps between buildings shrink toward street width. The far/taper tiers (by far the
+  // largest fraction of the city's screen area in the wide hill shots) use the cheapest per-house
+  // geometry already (a bare box, no roof mesh -- see farT/microT below), so tightening them costs
+  // very little per added triangle; near/mid keep a smaller tightening since each instance there
+  // also carries a separate roof mesh.
+  var cellNear = 12, cellMid = 19, cellFar = 68, cellTaper = cellFar * 1.2; // block cell size by ring (metres)
   var maxR = 1350; // extended from 1100 so the far LOD tier tapers out instead of cutting off abruptly
   var storyH = 2.9;
   function smoothstep01(e0, e1, x) { var t = (x - e0) / (e1 - e0); if (t < 0) t = 0; if (t > 1) t = 1; return t * t * (3 - 2 * t); }
@@ -560,14 +649,24 @@ window.buildTerrain = function (THREE, mats, H) {
     var dx = hx + 45, dz = hz;
     return (dx / 215) * (dx / 215) + (dz / 112) * (dz / 112);
   }
+  // The south-slope theatre/Odeon rock apron (built independently in 08-southslope.js, centred
+  // ~(-60,85) with a ~130x60 half-extent) isn't part of the main hill ellipse above, so without
+  // this the city grid (which only knows about that main ellipse) happily plants ordinary houses
+  // on top of/inside the carved hillside there -- confirmed in render as boxes with roofs poking
+  // out of the theatre's own rock face. Same elliptical gate, centred/sized on that apron with a
+  // small margin for each house's own footprint.
+  function inSouthSlopeApron(hx, hz) {
+    var dx = (hx + 60) / 148, dz = (hz - 85) / 78;
+    return dx * dx + dz * dz < 1;
+  }
   // Occupancy fraction beyond the mid tier: a smooth 3-step fade (~100% -> ~55% intermediate ->
   // ~30% at the haze edge) instead of the old hard jump from a fully-filled far tier straight to
   // the outer ring's 70%-kept coin-flip -- the city now thins out gradually as it recedes.
   function occupancyAt(rrv) {
     if (rrv < 620) return 1.0;
-    if (rrv < 1150) return 1.0 - 0.45 * smoothstep01(620, 1150, rrv);
-    if (rrv < 1350) return 0.55 - 0.25 * smoothstep01(1150, 1350, rrv);
-    return 0.30;
+    if (rrv < 1150) return 1.0 - 0.35 * smoothstep01(620, 1150, rrv);
+    if (rrv < 1350) return 0.65 - 0.22 * smoothstep01(1150, 1350, rrv);
+    return 0.43;
   }
   // Walk rings of increasing radius; within each ring, walk around it at the ring's own angular
   // step (derived from its cell size) so density stays even instead of thinning like 1/r.
@@ -589,6 +688,7 @@ window.buildTerrain = function (THREE, mats, H) {
       var world = fromGrid(jgx, jgz);
       var hx = -45 + world[0], hz = world[1];
       if (ellipseE(hx, hz) < 1) continue; // keep off the hill itself
+      if (inSouthSlopeApron(hx, hz)) continue; // keep off the theatre/Odeon rock apron
       var yaw = CITY_ROT + ((cix + ciz) % 2 ? PI / 2 : 0) + (cityR() - 0.5) * 0.1; // aligned to the block grid
       if (isStreet) {
         // Street gap: lay a couple of short worn-stone paving segments along the lane (near+mid
@@ -636,20 +736,23 @@ window.buildTerrain = function (THREE, mats, H) {
         // vacant lots, wider courtyards -- so the near-tier grid isn't a literal 100%-filled carpet
         // of houses between the streets.
         if (H.noise2(hx * 0.02, hz * 0.022, 811) > 0.62) continue;
-        // Near tier: full 1-6 story range with real variety -- ~40% single-storey cottages,
-        // ~40% ordinary 2-3.5 storey houses, ~20% tall 4-6 storey buildings.
+        // Near tier: real Athens as seen from the hills is mostly 4-7 storey apartment blocks
+        // (~8-25m at storyH=2.9), with just a minority of older 1-2 storey houses for variety --
+        // was skewed short (40% single-storey), which was a big part of the "sparse boxes" read.
         var roll1 = cityR(), stories1;
-        if (roll1 < 0.4) stories1 = 1 + cityR() * 0.35;
-        else if (roll1 < 0.8) stories1 = 2 + cityR() * 1.5;
-        else stories1 = 4 + cityR() * 2.2;
-        var sxh = 5 + cityR() * 6, szh = 5 + cityR() * 6, syh = stories1 * storyH;
+        if (roll1 < 0.15) stories1 = 1 + cityR() * 1.1;
+        else if (roll1 < 0.55) stories1 = 3 + cityR() * 2.0;
+        else stories1 = 5 + cityR() * 3.2;
+        var sxh = 6 + cityR() * 6, szh = 6 + cityR() * 6, syh = stories1 * storyH;
         houseT.push({ p: [hx, -80 + syh / 2, hz], r: [0, yaw, 0], s: [sxh, syh, szh] });
         roofBuckets[roofVariantAt(hx, hz)].push({ p: [hx, -80 + syh + 0.3 * ((sxh + szh) / 2) * 0.35, hz], r: [0, yaw, 0], s: [(sxh + szh) / 2 * 1.05, (sxh + szh) / 2 * 0.9, (sxh + szh) / 2 * 1.05] });
       } else if (rr < 620) {
         // Same coarse open-patch mask, sparser than the near tier so the mid tier still reads dense.
         if (H.noise2(hx * 0.014, hz * 0.016, 812) > 0.72) continue;
-        // Mid tier: kept to 1-2 storeys per the art pass, so height variety concentrates near the hill.
-        var stories2 = 1 + cityR() * 1.1;
+        // Mid tier: mostly mid-rise (3-6 storeys, ~8.7-17.4m) with a minority of shorter older
+        // houses, so the "wall of similar boxes" reads as a real block front, not a height-uniform
+        // band distinct from the near tier.
+        var stories2 = cityR() < 0.25 ? 1 + cityR() * 1.3 : 3 + cityR() * 3.0;
         var sx2 = 6 + cityR() * 11, sz2 = 6 + cityR() * 11, sy2 = stories2 * storyH;
         houseT.push({ p: [hx, -80 + sy2 / 2, hz], r: [0, yaw, 0], s: [sx2, sy2, sz2] });
         roofBuckets[roofVariantAt(hx, hz)].push({ p: [hx, -80 + sy2 + 0.3 * ((sx2 + sz2) / 2) * 0.35, hz], r: [0, yaw, 0], s: [(sx2 + sz2) / 2 * 1.05, (sx2 + sz2) / 2 * 0.9, (sx2 + sz2) / 2 * 1.05] });
@@ -657,14 +760,16 @@ window.buildTerrain = function (THREE, mats, H) {
         // Far tier now fades from fully-occupied at 620m down to the intermediate ~55% density by
         // 1150m (a gradient, not a flat 100%-filled band butting against the outer ring).
         if (cityR() > occupancyAt(rr)) continue;
-        var stories3 = 1 + cityR() * 1.1;
+        // Far tier's own block reads as most of the city's screen area in the wide hill shots, so
+        // it gets the same height variety as the nearer tiers (cheap: still one bare box, no roof).
+        var stories3 = cityR() < 0.2 ? 1 + cityR() * 1.3 : 2.5 + cityR() * 3.2;
         var sx3 = 6 + cityR() * 14, sz3 = 6 + cityR() * 14, sy3 = stories3 * storyH;
         farT.push({ p: [hx, -80 + sy3 / 2, hz], r: [0, yaw, 0], s: [sx3, sy3, sz3] });
       } else {
-        // Tapered outer ring (1150-1350m): occupancy keeps fading (from ~55% down to ~30%) on the
+        // Tapered outer ring (1150-1350m): occupancy keeps fading (from ~75% down to ~55%) on the
         // same curve as the far tier above, instead of a separate hard coin-flip threshold.
         if (cityR() > occupancyAt(rr)) continue;
-        var sx4 = 3 + cityR() * 5, sz4 = 3 + cityR() * 5, sy4 = (1 + cityR() * 0.8) * storyH;
+        var sx4 = 3 + cityR() * 5, sz4 = 3 + cityR() * 5, sy4 = (1.2 + cityR() * 2.2) * storyH;
         microT.push({ p: [hx, -80 + sy4 / 2, hz], r: [0, yaw, 0], s: [sx4, sy4, sz4] });
       }
     }

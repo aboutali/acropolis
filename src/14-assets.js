@@ -73,6 +73,16 @@ window.loadAssets = function (THREE, scene, mats, renderer, H) {
   function baseMaterial(kind, asset) {
     var src = kind === 'panel' ? mats.marbleRelief : mats.marbleStatue;
     var mat = (src && src.clone) ? src.clone() : new THREE.MeshStandardMaterial({ color: 0xd8d2c4, roughness: 0.7 });
+    // Round-3 photo fix (v-parth-w, v-cary, g-parth-pediment): the statue/
+    // relief scan textures are clean marble-scan captures and render near-
+    // white next to the surrounding weathered architectural marble, reading
+    // as pasted-on rather than the same aged stone. mats.marble/marbleWorn
+    // etc. leave their own .color at pure white and get all of their warm,
+    // weathered tone from their diffuse map, so tinting this clone's .color
+    // multiplies the scan's map down toward that same honey tone (the exact
+    // flat-mode value mats.marbleWorn itself falls back to) instead of
+    // swapping in a whole new texture.
+    if (mat.color) mat.color.set(0xd6c9ac);
     if (asset.normalMap) mat.normalMap = asset.normalMap;
     // Half-strength baked AO: full strength doubled up with SSAO and read as soot-black
     if (asset.aoMap) { mat.aoMap = asset.aoMap; mat.aoMapIntensity = 0.5; }

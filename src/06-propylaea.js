@@ -9,9 +9,28 @@ window.buildPropylaea = function (THREE, mats, H) {
   group.position.set(-118, 0, -6);
 
   // CENTRAL HALL
+  //
+  // Director's r3 review (v-prop): the hall's own krepis was modelled
+  // entirely at/below y=0 (its widest, lowest step bottoms out at
+  // -stepH*steps), while the surrounding plaza pavement sits at y=0 --
+  // so the whole staircase was buried under the pavement plane and every
+  // camera just saw a flat floor with columns rising straight out of it
+  // ("no monumental staircase ... just flat pavement"). Wrapping the
+  // hall's geometry in its own group raised by PLINTH (= the krepis's
+  // total rise) puts the outermost step's bottom back at world y=0
+  // (flush with the plaza) and the stylobate at y=PLINTH where the
+  // colonnade stands -- the krepis itself is now the visible tiered
+  // marble staircase the review asked for, with no separate geometry
+  // needed. Also bumped from a 4-step, single-thick plinth to 5 shallower
+  // (0.4 m) steps on a deeper (0.85) tread inset: reads as a properly
+  // monumental multi-course approach rather than one thick block.
+  var PLINTH = 2.0;
+  var hall = new THREE.Group();
+  hall.position.y = PLINTH;
+  group.add(hall);
 
-  var centralBase = H.makeSteppedBase(24, 18, 4, 0.5);
-  group.add(centralBase);
+  var centralBase = H.makeSteppedBase(24, 18, 5, PLINTH / 5, 0.85);
+  hall.add(centralBase);
 
   // West façade: 6 Doric columns at x = -10.5, z evenly in [-7.5, 7.5]
   var westPos = [];
@@ -20,7 +39,7 @@ window.buildPropylaea = function (THREE, mats, H) {
     westPos.push([-10.5, z]);
   }
   var westCols = H.makeDoricColumns(westPos, { height: 8.57, baseD: 1.6, topD: 1.25 });
-  group.add(westCols);
+  hall.add(westCols);
 
   // East façade: 6 Doric columns at x = +10.5, same z
   var eastPos = [];
@@ -29,7 +48,7 @@ window.buildPropylaea = function (THREE, mats, H) {
     eastPos.push([10.5, z]);
   }
   var eastCols = H.makeDoricColumns(eastPos, { height: 8.0, baseD: 1.5, topD: 1.2 });
-  group.add(eastCols);
+  hall.add(eastCols);
 
   // Interior: 6 Ionic columns in two rows of 3 (colonnade runs along x, so
   // rotY faces the volutes along z, across the processional way).
@@ -42,7 +61,7 @@ window.buildPropylaea = function (THREE, mats, H) {
     }
   }
   var ionicCols = H.makeIonicColumns(ionicPos, { height: 10.25, baseD: 1.0 });
-  group.add(ionicCols);
+  hall.add(ionicCols);
 
   // Cross-wall at x = +3: 6 pillars and lintel
   var zPositions = [-8.5, -5.4, -2.2, 2.2, 5.4, 8.5];
@@ -51,127 +70,156 @@ window.buildPropylaea = function (THREE, mats, H) {
     var pillar = new THREE.Mesh(pillarGeo, mats.marbleWorn);
     pillar.position.set(3, 4.5, zPositions[i]);
     pillar.castShadow = true; pillar.receiveShadow = true;
-    group.add(pillar);
+    hall.add(pillar);
   }
 
   var lintelGeo = new THREE.BoxGeometry(1.5, 2, 18);
   var lintel = new THREE.Mesh(lintelGeo, mats.marbleWorn);
   lintel.position.set(3, 8, 0);
   lintel.castShadow = true; lintel.receiveShadow = true;
-  group.add(lintel);
+  hall.add(lintel);
 
   // Entablature (Doric)
   var entablature = H.makeEntablature(24, 18, 2.6, { triglyphs: true, triglyphCount: 12, zCount: 9 });
   entablature.position.y = 8.57;
-  group.add(entablature);
+  hall.add(entablature);
 
   // Pediments
   var pediment1 = H.makePediment(18, 1.0, 2.6, { figures: 0 });
   pediment1.position.set(-12, 11.17, 0);
   pediment1.rotation.y = -Math.PI / 2;
-  group.add(pediment1);
+  hall.add(pediment1);
 
   var pediment2 = H.makePediment(18, 1.0, 2.6, { figures: 0 });
   pediment2.position.set(12, 11.17, 0);
   pediment2.rotation.y = Math.PI / 2;
-  group.add(pediment2);
+  hall.add(pediment2);
 
   // Roof
   var roof = H.makeGableRoof(18, 24, 0.24, { tiles: true });
   roof.position.y = 11.2;
   roof.rotation.y = Math.PI / 2;
-  group.add(roof);
+  hall.add(roof);
 
   // WINGS
+  //
+  // Director's r3 review (v-prop, v-w): the wings were two small
+  // gable-roofed "cottage" boxes with pitched orange-tiled roofs, reading
+  // as domestic outbuildings rather than part of the same Doric complex.
+  // Replaced with flat-roofed, flat-topped Doric wings styled off the same
+  // order as the central hall (ashlar cella, Doric entablature, no pitched
+  // tile roofs): a larger Pinakotheke to the north with its own shallow
+  // 3-column porch facing the forecourt, and a smaller, plain (columnless)
+  // south wing so the two read as clearly different in scale, exactly per
+  // the review note. Both stay on their own low plinth at the group's own
+  // y=0 (the forecourt level) -- one course below the newly-raised hall --
+  // matching the real Propylaea, where the flanking wings sit at the
+  // approach level and only the central passage is lifted on its krepis.
 
-  // North wing (Pinakotheke) centred at local (-8, 0, -16)
-  var northBase = H.makeSteppedBase(12, 10, 2, 0.5);
-  northBase.position.set(-8, 0, -16);
+  // North wing: Pinakotheke
+  var nwCX = -9, nwCZ = -20, nwW = 15, nwD = 13;
+  var nwColH = 7.5, nwEntH = 2.2, nwPorchD = 2.6;
+
+  var northBase = H.makeSteppedBase(nwW, nwD, 2, 0.3);
+  northBase.position.set(nwCX, 0, nwCZ);
   group.add(northBase);
 
-  var northCella = H.makeCella(12, 10, 5.4, { doorWidth: 2.5, doorSide: '+z' });
-  northCella.position.set(-8, 0, -16);
+  var nwFrontZ = nwCZ + nwD / 2;              // wing's own +z (forecourt-facing) edge
+  var nwCellaD = nwD - nwPorchD;
+  var nwCellaCZ = nwCZ - nwPorchD / 2;         // cella recessed behind the porch bay
+  var northCella = H.makeCella(nwW, nwCellaD, nwColH, { doorWidth: 3, doorSide: '+z' });
+  northCella.position.set(nwCX, 0, nwCellaCZ);
   group.add(northCella);
 
   var northColPos = [];
+  var nwPorchZ = nwFrontZ - 0.9;
   for (var i = 0; i < 3; i++) {
-    var x = -8 + (-4 + i * 4);
-    northColPos.push([x, -16 + 5.5]);
+    var x = nwCX - nwW * 0.32 + i * (nwW * 0.32);
+    northColPos.push([x, nwPorchZ]);
   }
-  var northCols = H.makeDoricColumns(northColPos, { height: 5.4, baseD: 1.0, topD: 0.8, simple: true });
+  var northCols = H.makeDoricColumns(northColPos, { height: nwColH, baseD: 1.3, topD: 1.0, simple: true });
   group.add(northCols);
 
-  // Director's r2 review (v-prop): a flat slab roof reads as a plain windowless
-  // box from every angle, and with the south wing the same height the whole
-  // complex silhouettes as one undifferentiated block. A proper gable (with
-  // pediment caps facing the wing's own entrance axis, north-south, matching
-  // the columns above) gives the Pinakotheke a distinct temple-like profile
-  // and a different ridge height from the central hall and the south wing.
-  var northRoof = H.makeGableRoof(12.6, 10.6, 0.24, { tiles: true });
-  northRoof.position.set(-8, 5.4, -16);
+  var northEnt = H.makeEntablature(nwW, nwD, nwEntH, { triglyphs: true, triglyphCount: 6, zCount: 5 });
+  northEnt.position.set(nwCX, nwColH, nwCZ);
+  group.add(northEnt);
+
+  var nwRoofY = nwColH + nwEntH;
+  var northRoof = new THREE.Mesh(new THREE.BoxGeometry(nwW + 0.6, 0.3, nwD + 0.6), mats.marbleWorn);
+  northRoof.position.set(nwCX, nwRoofY + 0.15, nwCZ);
+  northRoof.castShadow = true; northRoof.receiveShadow = true;
   group.add(northRoof);
 
-  var northPediment1 = H.makePediment(11.8, 0.5, 1.3, { figures: 0 });
-  northPediment1.position.set(-8, 5.4, -16 - 10.6 / 2);
-  group.add(northPediment1);
+  var northParapet = H.makeBlockCourse(nwW + 0.4, nwD + 0.4, 0.4, 1.4);
+  northParapet.position.set(nwCX, nwRoofY + 0.5, nwCZ);
+  group.add(northParapet);
 
-  var northPediment2 = H.makePediment(11.8, 0.5, 1.3, { figures: 0 });
-  northPediment2.position.set(-8, 5.4, -16 + 10.6 / 2);
-  northPediment2.rotation.y = Math.PI;
-  group.add(northPediment2);
+  // South wing: smaller, plain -- ashlar cella and a simple Doric cornice,
+  // no colonnade at all, so it clearly reads as the lesser of the two wings.
+  var swCX = -8, swCZ = 17, swW = 8, swD = 7;
+  var swH = 6.0, swEntH = 1.6;
 
-  // South wing centred at local (-8, 0, +17)
-  var southBase = H.makeSteppedBase(9, 8, 2, 0.5);
-  southBase.position.set(-8, 0, 17);
+  var southBase = H.makeSteppedBase(swW, swD, 2, 0.3);
+  southBase.position.set(swCX, 0, swCZ);
   group.add(southBase);
 
-  // Director's r2 review (v-prop): south wing height dropped from 5.4 to 4.6
-  // (matched by its cella/column height below) so the two wings read as
-  // distinct chambers with their own roof lines rather than one uniform
-  // height repeated across the whole complex.
-  var southH = 4.6;
-  var southCella = H.makeCella(9, 8, southH, { doorWidth: 2.5, doorSide: '-z' });
-  southCella.position.set(-8, 0, 17);
+  var southCella = H.makeCella(swW, swD, swH, { doorWidth: 2, doorSide: '-z' });
+  southCella.position.set(swCX, 0, swCZ);
   group.add(southCella);
 
-  var southColPos = [];
-  for (var i = 0; i < 3; i++) {
-    var x = -8 + (-3 + i * 3);
-    southColPos.push([x, 17 - 4.5]);
-  }
-  var southCols = H.makeDoricColumns(southColPos, { height: southH, baseD: 1.0, topD: 0.8, simple: true });
-  group.add(southCols);
+  // triglyphs stay on (just a sparser count than the wings/hall) rather than
+  // off: H.makeEntablature only fills the frieze band when triglyphs is
+  // true (the off path leaves the whole frieze height an open gap, which
+  // read as a dark slot clean through the entablature in the first render
+  // of this pass) -- "plain" here means no colonnade, not a hollow cornice.
+  var southEnt = H.makeEntablature(swW, swD, swEntH, { triglyphs: true, triglyphCount: 3, zCount: 2, sima: false });
+  southEnt.position.set(swCX, swH, swCZ);
+  group.add(southEnt);
 
-  var southRoof = H.makeGableRoof(9.6, 8.6, 0.26, { tiles: true });
-  southRoof.position.set(-8, southH, 17);
+  var southRoof = new THREE.Mesh(new THREE.BoxGeometry(swW + 0.5, 0.25, swD + 0.5), mats.marbleWorn);
+  southRoof.position.set(swCX, swH + swEntH + 0.125, swCZ);
+  southRoof.castShadow = true; southRoof.receiveShadow = true;
   group.add(southRoof);
 
-  var southPediment1 = H.makePediment(8.8, 0.4, 1.1, { figures: 0 });
-  southPediment1.position.set(-8, southH, 17 - 8.6 / 2);
-  group.add(southPediment1);
+  // NIKE BASTION AND TEMPLE, projecting south-west of the entrance
+  //
+  // Director's r3 review (v-prop): the bastion sat almost flush against
+  // the south wing's own footprint, so it read as merged into the wing's
+  // massing rather than a separate, visible projecting bastion. Pushed
+  // further south (clear of the now-slimmer south wing) and enlarged
+  // ~15%, with a low ashlar parapet along its exposed west/south edges,
+  // so it reads as a real fortified platform carrying the temple rather
+  // than a small plinth tucked out of sight.
+  var bnX = -15, bnZ = 27.5;
+  var bnW = 11, bnD = 13.2;
 
-  var southPediment2 = H.makePediment(8.8, 0.4, 1.1, { figures: 0 });
-  southPediment2.position.set(-8, southH, 17 + 8.6 / 2);
-  southPediment2.rotation.y = Math.PI;
-  group.add(southPediment2);
-
-  // NIKE BASTION AND TEMPLE centred at local (-15, 0, +26)
-
-  var bastionGeo = new THREE.BoxGeometry(9.6, 6, 11.5);
+  var bastionGeo = new THREE.BoxGeometry(bnW, 6, bnD);
   var bastion = new THREE.Mesh(bastionGeo, mats.rock);
-  bastion.position.set(-15, 0.2, 26);
+  bastion.position.set(bnX, 0.2, bnZ);
   bastion.castShadow = true; bastion.receiveShadow = true;
   group.add(bastion);
 
-  var ashlarCap = H.makeBlockCourse(9.6, 11.5, 1.2, 1.4);
-  ashlarCap.position.set(-15, 2.0, 26);
+  var ashlarCap = H.makeBlockCourse(bnW, bnD, 1.2, 1.4);
+  ashlarCap.position.set(bnX, 2.0, bnZ);
   group.add(ashlarCap);
+
+  var parapetWGeo = new THREE.BoxGeometry(0.35, 0.7, bnD + 0.4);
+  var parapetW = new THREE.Mesh(parapetWGeo, mats.rockDark);
+  parapetW.position.set(bnX - bnW / 2 - 0.1, 3.55, bnZ);
+  parapetW.castShadow = true; parapetW.receiveShadow = true;
+  group.add(parapetW);
+
+  var parapetSGeo = new THREE.BoxGeometry(bnW + 0.4, 0.7, 0.35);
+  var parapetS = new THREE.Mesh(parapetSGeo, mats.rockDark);
+  parapetS.position.set(bnX, 3.55, bnZ + bnD / 2 + 0.1);
+  parapetS.castShadow = true; parapetS.receiveShadow = true;
+  group.add(parapetS);
 
   var postGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.2, 6);
   var postPositions = [
-    [-15 - 4.8, 3.8, 26 - 5.75], [-15 - 4.8, 3.8, 26 + 5.75],
-    [-15 + 4.8, 3.8, 26 - 5.75], [-15 + 4.8, 3.8, 26 + 5.75],
-    [-15, 3.8, 26 - 5.75], [-15, 3.8, 26 + 5.75]
+    [bnX - bnW / 2, 3.8, bnZ - bnD / 2], [bnX - bnW / 2, 3.8, bnZ + bnD / 2],
+    [bnX + bnW / 2, 3.8, bnZ - bnD / 2], [bnX + bnW / 2, 3.8, bnZ + bnD / 2],
+    [bnX, 3.8, bnZ - bnD / 2], [bnX, 3.8, bnZ + bnD / 2]
   ];
   var postTransforms = [];
   for (var i = 0; i < postPositions.length; i++) postTransforms.push({ p: postPositions[i] });
@@ -180,17 +228,17 @@ window.buildPropylaea = function (THREE, mats, H) {
 
   // Temple of Athena Nike - stepped base
   var templeBase = H.makeSteppedBase(5.44, 8.27, 2, 0.35);
-  templeBase.position.set(-15, 3.9, 26);
+  templeBase.position.set(bnX, 3.9, bnZ);
   group.add(templeBase);
 
   // Ionic columns: 4 on each short end (rotY faces the volutes along x,
   // across the temple's short ends, matching the real amphiprostyle plan).
   var templeColPos = [];
-  var zEnds = [26 - 3.4, 26 + 3.4];
+  var zEnds = [bnZ - 3.4, bnZ + 3.4];
   for (var end = 0; end < 2; end++) {
     var z = zEnds[end];
     for (var col = 0; col < 4; col++) {
-      var x = -15 + (-2.1 + (col / 3) * 4.2);
+      var x = bnX + (-2.1 + (col / 3) * 4.2);
       templeColPos.push([x, z]);
     }
   }
@@ -199,26 +247,26 @@ window.buildPropylaea = function (THREE, mats, H) {
 
   // Cella
   var templeCella = H.makeCella(3.7, 4.4, 4.0, { doorWidth: 1.4, doorSide: '+z', thickness: 0.4 });
-  templeCella.position.set(-15, 3.9, 26);
+  templeCella.position.set(bnX, 3.9, bnZ);
   group.add(templeCella);
 
   // Entablature (Ionic)
   var templeEntablature = H.makeEntablature(5.44, 8.27, 1.1, { order: 'ionic', triglyphs: false });
-  templeEntablature.position.set(-15, 7.9, 26);
+  templeEntablature.position.set(bnX, 7.9, bnZ);
   group.add(templeEntablature);
 
   // Roof
   var templeRoof = H.makeGableRoof(5.6, 8.4, 0.18, { tiles: true });
-  templeRoof.position.set(-15, 9.0, 26);
+  templeRoof.position.set(bnX, 9.0, bnZ);
   group.add(templeRoof);
 
   // Pediments
   var templePediment1 = H.makePediment(5.6, 0.5, 0.9, { figures: 0 });
-  templePediment1.position.set(-15, 9.0, 26 - 4.2);
+  templePediment1.position.set(bnX, 9.0, bnZ - 4.2);
   group.add(templePediment1);
 
   var templePediment2 = H.makePediment(5.6, 0.5, 0.9, { figures: 0 });
-  templePediment2.position.set(-15, 9.0, 26 + 4.2);
+  templePediment2.position.set(bnX, 9.0, bnZ + 4.2);
   templePediment2.rotation.y = Math.PI;
   group.add(templePediment2);
 

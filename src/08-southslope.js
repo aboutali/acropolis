@@ -21,24 +21,30 @@ window.buildSouthSlope = function (THREE, mats, H) {
   }
 
   // Stepped auditorium as one mesh: per row a riser facing the orchestra and a tread facing up.
-  var seatMat = mats.marbleShadowed.clone();
+  // Photo reference (Odeon/Theatre of Dionysus seating) reads as pale limestone throughout, so this
+  // starts from the lighter marbleWorn map (marbleShadowed's own darken=0.72 base, stacked with the
+  // gravity-weathering multiply below, was reading near-black across most of the bowl) -- the
+  // weathering gradient still does the darkening toward the lower rows, just off a paler base.
+  var seatMat = mats.marbleWorn.clone();
   seatMat.side = THREE.DoubleSide;
   seatMat.vertexColors = true;
   // Duller, dirtier base tone used only under the lower, foot-trafficked/rain-channelled rows.
-  var wornSeatMat = mats.marbleShadowed.clone();
+  var wornSeatMat = mats.marbleWorn.clone();
   wornSeatMat.side = THREE.DoubleSide;
   wornSeatMat.vertexColors = true;
   wornSeatMat.color = new THREE.Color(0xab9a72);
 
   // Gravity-biased weathering: seating darkens toward the lower rows, with rust-orange staining
-  // patches and high-frequency worn/dirt spots layered on top.
+  // patches and high-frequency worn/dirt spots layered on top. Floor raised (was 0.6) so even the
+  // front row stays a light grey-tan rather than crossing into near-black once multiplied against
+  // the base map and the scene's own shadowing -- only the top rows need to read as fully pale.
   function caveaVertexColor(x, y, z, rowFrac) {
     var wear = H.noise2(x * 0.15, z * 0.15, 831);
     var spotN = H.noise2(x * 0.6, z * 0.6, 833);
     var rustN = H.noise2(x * 0.09, z * 0.11, 835);
-    var grav = 0.6 + 0.4 * rowFrac; // rowFrac: 0 at the front/lowest row, 1 at the top
-    var spotWear = spotN > 0.55 ? (spotN - 0.55) * 0.95 : 0;
-    var base = grav * (1 - spotWear) * (0.92 + 0.08 * wear);
+    var grav = 0.82 + 0.18 * rowFrac; // rowFrac: 0 at the front/lowest row, 1 at the top
+    var spotWear = spotN > 0.55 ? (spotN - 0.55) * 0.6 : 0;
+    var base = grav * (1 - spotWear) * (0.94 + 0.06 * wear);
     var rustAmt = rustN > 0.28 ? (rustN - 0.28) * 0.7 * (1 - rowFrac * 0.5) : 0;
     return [
       clamp01(base * (1 + rustAmt * 0.35)),
@@ -133,13 +139,39 @@ window.buildSouthSlope = function (THREE, mats, H) {
   theatreGroup.add(H.instance(throneSeatGeo, mats.marble, seatT));
   theatreGroup.add(H.instance(throneBackGeo, mats.marble, backT));
 
-  // Paved orchestra: pale plaster paving (visually distinct from the surrounding worn-marble
-  // seating) with raised concentric ring steps -- not just painted-on lines -- and a compact
-  // white-marble thymele block at the centre.
-  var orchGeom = new THREE.CylinderGeometry(19, 19, 0.3, MOBILE ? 24 : 40);
-  var orchMesh = new THREE.Mesh(orchGeom, mats.plaster);
+  // Paved orchestra: worn pale-limestone paving (visually distinct from the seating but not a
+  // flat, featureless bright-white slab) with raised concentric ring steps -- not just painted-on
+  // lines -- and a compact white-marble thymele block at the centre. Thinned from 0.3m to 0.12m and
+  // moved off the plain uniform mats.plaster: at a low, near-grazing viewing angle a thick, glossy,
+  // perfectly flat disc this size read as an oversized floating capsule rather than pavement -- a
+  // thinner slab in the same textured stone as the surrounding seating grounds it as a paved floor.
+  var orchGeom = new THREE.CylinderGeometry(19, 19, 0.12, MOBILE ? 24 : 40);
+  // Radial paving-joint pattern (vertex colour, no extra geometry): a perfectly smooth flat disc
+  // this large reads, at a low near-grazing viewing angle, as a single continuous lit "rounded"
+  // volume rather than a paved floor -- real stone flooring is jointed into individual slabs, and
+  // painting those seams in breaks the smooth shading gradient that causes the illusion.
+  (function () {
+    var opos = orchGeom.attributes.position, oarr = opos.array, ocnt = opos.count;
+    var ocol = new Float32Array(ocnt * 3);
+    var spokes = 24;
+    for (var ov = 0; ov < ocnt; ov++) {
+      var ox = oarr[ov * 3], oz = oarr[ov * 3 + 2];
+      var oang = Math.atan2(oz, ox), orad = Math.sqrt(ox * ox + oz * oz);
+      var spokeFrac = ((oang / (Math.PI * 2)) * spokes) % 1;
+      var spokeLine = Math.min(spokeFrac, 1 - spokeFrac) < 0.035 ? 1 : 0;
+      var ringFrac = (orad / 2.6) % 1;
+      var ringLine = Math.min(ringFrac, 1 - ringFrac) < 0.05 ? 1 : 0;
+      var joint = Math.max(spokeLine, ringLine);
+      var shade = 1 - joint * 0.30;
+      ocol[ov * 3] = shade; ocol[ov * 3 + 1] = shade; ocol[ov * 3 + 2] = shade;
+    }
+    orchGeom.setAttribute('color', new THREE.Float32BufferAttribute(ocol, 3));
+  })();
+  var orchMat = mats.marbleWorn.clone();
+  orchMat.vertexColors = true;
+  var orchMesh = new THREE.Mesh(orchGeom, orchMat);
   orchMesh.castShadow = true; orchMesh.receiveShadow = true;
-  orchMesh.position.y = -0.15;
+  orchMesh.position.y = -0.06;
   theatreGroup.add(orchMesh);
   // Concentric paving rings as real raised steps (thin annular cylinders), each a touch higher
   // than the last, reading as distinct pavement courses rather than a flat unmarked disc.
