@@ -37,9 +37,16 @@ window.startAcropolis = function () {
     try {
       composer = new THREE.EffectComposer(renderer);
       ssao = new THREE.SSAOPass(scene, camera, W, Hh);
-      ssao.kernelRadius = 6;
-      ssao.minDistance = 0.0004;
-      ssao.maxDistance = 0.02;
+      // Distances are fractions of the camera range (far = 9000 m): about 0.5 m to 36 m
+      ssao.kernelRadius = 3.5;
+      ssao.minDistance = 0.00006;
+      ssao.maxDistance = 0.004;
+      // Stock SSAO is faint at this scale: raise its occlusion term to a power
+      ssao.ssaoMaterial.fragmentShader = ssao.ssaoMaterial.fragmentShader.replace(
+        'gl_FragColor = vec4( vec3( 1.0 - occlusion ), 1.0 );',
+        'gl_FragColor = vec4( vec3( pow( 1.0 - occlusion, 3.0 ) ), 1.0 );');
+      ssao.ssaoMaterial.needsUpdate = true;
+      if (location.search.indexOf('aoonly') >= 0) ssao.output = THREE.SSAOPass.OUTPUT.SSAO;
       composer.addPass(ssao);
       composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(W, Hh), 0.18, 0.5, 0.92));
       composer.addPass(new THREE.ShaderPass(THREE.GammaCorrectionShader));
