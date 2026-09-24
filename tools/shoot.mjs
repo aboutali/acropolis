@@ -1,7 +1,7 @@
 // Headless screenshots of index.html for visual review. Output goes to tools/shots/ (gitignored).
 // Usage: node tools/shoot.mjs [view ...]   (default: every preset). Needs Playwright (global install is fine).
 //        node tools/shoot.mjs --at '{"t":[x,y,z],"r":30,"theta":0.5,"phi":1.3}' name   (custom camera, desktop only)
-// DESK_ONLY=1 skips the phone viewport.
+// DESK_ONLY=1 skips the phone viewport. WAIT=<ms> waits longer before the shot (assets load after start).
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -53,7 +53,7 @@ for (const [label, vp] of [['desk', { width: 1280, height: 800 }], ['phone', { w
       await page.waitForTimeout(2500);
       await page.evaluate(c => { window.acropolisCtrl.setAutoRotate(false); window.acropolisCtrl.jumpTo(c); }, custom);
     }
-    await page.waitForTimeout(6000);
+    await page.waitForTimeout(+(process.env.WAIT || 6000));
     const file = path.join(OUT, `${v}${process.env.TAG || ''}-${label}.png`);
     await page.screenshot({ path: file, timeout: 180000 });
     console.log(file, await page.textContent('#debug'));
