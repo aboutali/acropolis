@@ -73,7 +73,8 @@ window.loadAssets = function (THREE, scene, mats, renderer, H) {
     var src = kind === 'panel' ? mats.marbleRelief : mats.marbleStatue;
     var mat = (src && src.clone) ? src.clone() : new THREE.MeshStandardMaterial({ color: 0xd8d2c4, roughness: 0.7 });
     if (asset.normalMap) mat.normalMap = asset.normalMap;
-    if (asset.aoMap) { mat.aoMap = asset.aoMap; mat.aoMapIntensity = 1.0; }
+    // Half-strength baked AO: full strength doubled up with SSAO and read as soot-black
+    if (asset.aoMap) { mat.aoMap = asset.aoMap; mat.aoMapIntensity = 0.5; }
     // Relief panels are thin single-facing slabs; the scan's own winding
     // doesn't reliably agree with the procedural slot's outward-facing
     // convention, and a backface-culled panel renders as a hole straight
@@ -98,11 +99,11 @@ window.loadAssets = function (THREE, scene, mats, renderer, H) {
 
   // Adds `mesh` to the scene at the procedural object's world transform,
   // then hides (does not remove) the procedural object.
-  function place(proc, mesh) {
+  function place(proc, mesh, noShadow) {
     var t = worldTransform(proc);
     mesh.position.copy(t.pos);
     mesh.quaternion.copy(t.quat);
-    mesh.castShadow = true;
+    mesh.castShadow = !noShadow;
     mesh.receiveShadow = true;
     scene.add(mesh);
     proc.visible = false;
@@ -141,12 +142,11 @@ window.loadAssets = function (THREE, scene, mats, renderer, H) {
 
   // =====================================================================
   // Pediment figures: recline -> Dionysos, kneel/seated -> Artemis or
-  // Kekrops-Pandrossos (alternating), stand -> Iris. To stay within the
-  // scene's triangle budget (92 pediment/relief slots exist in total, far
-  // more than is worth spending scanned-mesh triangles on) only a capped,
-  // evenly-spread subset of each pose is swapped; the rest stay procedural.
+  // Kekrops-Pandrossos (alternating), stand -> Iris. Every slot is swapped,
+  // using the ~2k-triangle *_lo bakes: the figures sit 15 m up, where the
+  // baked normal map carries the carving.
   // =====================================================================
-  var FIGURE_CAP_PER_POSE = 1;
+  var FIGURE_CAP_PER_POSE = Infinity;
   function capSlots(slots, cap) {
     if (slots.length <= cap) return slots;
     var out = [], step = slots.length / cap;
@@ -166,16 +166,19 @@ window.loadAssets = function (THREE, scene, mats, renderer, H) {
         var mesh = new THREE.Mesh(asset.geometry, mat);
         var targetH = proc.userData.height || asset.size.y;
         var s = targetH / asset.size.y;
+        // Seated groups fill standing slots; shrink them so they stay under the raking cornice
+        if (pose === 'stand') s *= 0.85;
         mesh.scale.set(s, s, s);
         place(proc, mesh);
       });
     });
   }
 
-  swapFigurePose('recline', ['dionysos']);
-  swapFigurePose('kneel', ['artemis', 'kekrops_pandrossos']);
-  swapFigurePose('seated', ['kekrops_pandrossos', 'artemis']);
-  swapFigurePose('stand', ['iris']);
+  swapFigurePose('recline', ['dionysos_lo']);
+  swapFigurePose('kneel', ['artemis_lo', 'kekrops_pandrossos_lo']);
+  swapFigurePose('seated', ['kekrops_pandrossos_lo', 'artemis_lo']);
+  // Iris is a headless fragment that shatters into shards when stretched to a full standing slot
+  swapFigurePose('stand', ['artemis_lo', 'kekrops_pandrossos_lo']);
 
   // =====================================================================
   // Metopes and frieze strips: H.makeRelief tags every panel 'relief' and
@@ -193,9 +196,10 @@ window.loadAssets = function (THREE, scene, mats, renderer, H) {
   // rather than an even spread across all 92, so the capped budget lands on
   // the building's most visible face instead of being diluted across faces
   // a normal viewing angle never sees at once.
-  var METOPE_CAP = 6, FRIEZE_CAP = 2;
-  var METOPE_MODELS = ['metope_south09', 'metope_north03', 'metope_west09', 'metope_east10'];
-  var FRIEZE_MODELS = ['frieze_south10', 'frieze_north3839', 'frieze_west0102'];
+  // All panels, using the ~800-triangle *_lo bakes (supersedes the caps described above)
+  var METOPE_CAP = Infinity, FRIEZE_CAP = Infinity;
+  var METOPE_MODELS = ['metope_south09_lo', 'metope_north03_lo', 'metope_west09_lo', 'metope_east10_lo'];
+  var FRIEZE_MODELS = ['frieze_south10_lo', 'frieze_north3839_lo', 'frieze_west0102_lo'];
 
   function swapPanels(pred, cap, modelNames) {
     var slots = findSlots(pred).slice(0, cap);
@@ -211,7 +215,10 @@ window.loadAssets = function (THREE, scene, mats, renderer, H) {
         var sx = w / asset.size.x, sy = h / asset.size.y;
         var sz = (sx + sy) / 2; // keep relief depth proportionate rather than stretched
         mesh.scale.set(sx, sy, sz);
-        place(proc, mesh);
+        // Panels sit in shade under the cornice; skipping them in the shadow pass saves ~100k triangles
+        place(proc, mesh, true);
+        // The scans' carved face points the opposite way to the procedural panels
+        if (location.search.indexOf('panelflip0') < 0) mesh.rotateY(Math.PI);
       });
     });
   }

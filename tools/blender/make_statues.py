@@ -105,6 +105,14 @@ MODELS = [
          tris=12000, yaw_deg=0, bake=True),
 ]
 
+# Low-detail variants for small, distant slots (pediment figures, metopes, frieze): the baked
+# normal map carries the carving, so a much coarser mesh reads the same from the ground.
+LOD_TRIS = {'dionysos': 2000, 'iris': 2000, 'artemis': 2000, 'kekrops_pandrossos': 2000}
+for _spec in list(MODELS):
+    _lo = LOD_TRIS.get(_spec['name'], 800 if _spec['kind'] == 'panel' else None)
+    if _lo:
+        MODELS.append(dict(_spec, name=_spec['name'] + '_lo', tris=_lo))
+
 
 def log(msg):
     print('[make_statues] %s' % msg, flush=True)
