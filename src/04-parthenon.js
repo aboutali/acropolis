@@ -50,22 +50,38 @@ window.buildParthenon = function (THREE, mats, H) {
   var metopeSeedBase = 3000;
   var entablature = H.makeEntablature(30.9, 69.5, 3.3, {
     triglyphs: true, triglyphCount: 13, zCount: 31,
-    // One figure per metope plate (not two): with 92 bays this halves the
-    // relief triangle cost while still reading as carved sculpture rather
-    // than a blank slab from normal viewing distance.
+    // Director's r2 review (v-parth-w/-se): metopes read as blank cream
+    // plaques from normal viewing distance — a low-detail figure at the
+    // panel's native (very shallow) carve depth doesn't cast enough shadow
+    // to read as sculpture from outside the colonnade. Dropping lowDetail
+    // adds the figure's drape-fold box back for a touch more surface break,
+    // and scaling the returned mesh along its own carve axis (z, anchored at
+    // the panel's front face) exaggerates the relief depth ~3.2x without
+    // touching H.makeRelief itself — the panel's footprint in the frieze
+    // band is unchanged, only how far the figure projects (and the slab
+    // recedes) grows, giving real cast shadow at normal viewing distance.
+    // Kept to 1 figure/metope (not 2) to hold the triangle budget.
     metopeMaker: H.makeRelief ? function (idx, mw, mh) {
-      return H.makeRelief(mw, mh, { lowDetail: true, seed: metopeSeedBase + idx, figures: 1 });
+      var m = H.makeRelief(mw, mh, { seed: metopeSeedBase + idx, figures: 1 });
+      m.scale.z = 3.4;
+      return m;
     } : null
   });
   entablature.position.y = 10.43;
   group.add(entablature);
 
-  // Pediments (figures pose toward the corners automatically)
-  var pedimentFront = H.makePediment(30.9, 1.2, 3.4, { figures: 11 });
+  // Pediments (figures pose toward the corners automatically). Director's r2
+  // review (v-parth-w/-se): the sparse 11-figure group left wide gaps of bare
+  // tympanum between figures, reading as "mostly empty" at normal viewing
+  // distance even though figures were technically present. 15 packs the
+  // triangular field the way the real pedimental sculpture groups do —
+  // Athena/Poseidon centre pair, kneeling attendants, reclining corner
+  // figures — with no gap wide enough to read as missing sculpture.
+  var pedimentFront = H.makePediment(30.9, 1.2, 3.4, { figures: 15 });
   pedimentFront.position.set(0, 13.73, 34.75);
   group.add(pedimentFront);
 
-  var pedimentBack = H.makePediment(30.9, 1.2, 3.4, { figures: 11 });
+  var pedimentBack = H.makePediment(30.9, 1.2, 3.4, { figures: 15 });
   pedimentBack.position.set(0, 13.73, -34.75);
   pedimentBack.rotation.y = Math.PI;
   group.add(pedimentBack);

@@ -3075,22 +3075,38 @@ window.buildParthenon = function (THREE, mats, H) {
   var metopeSeedBase = 3000;
   var entablature = H.makeEntablature(30.9, 69.5, 3.3, {
     triglyphs: true, triglyphCount: 13, zCount: 31,
-    // One figure per metope plate (not two): with 92 bays this halves the
-    // relief triangle cost while still reading as carved sculpture rather
-    // than a blank slab from normal viewing distance.
+    // Director's r2 review (v-parth-w/-se): metopes read as blank cream
+    // plaques from normal viewing distance — a low-detail figure at the
+    // panel's native (very shallow) carve depth doesn't cast enough shadow
+    // to read as sculpture from outside the colonnade. Dropping lowDetail
+    // adds the figure's drape-fold box back for a touch more surface break,
+    // and scaling the returned mesh along its own carve axis (z, anchored at
+    // the panel's front face) exaggerates the relief depth ~3.2x without
+    // touching H.makeRelief itself — the panel's footprint in the frieze
+    // band is unchanged, only how far the figure projects (and the slab
+    // recedes) grows, giving real cast shadow at normal viewing distance.
+    // Kept to 1 figure/metope (not 2) to hold the triangle budget.
     metopeMaker: H.makeRelief ? function (idx, mw, mh) {
-      return H.makeRelief(mw, mh, { lowDetail: true, seed: metopeSeedBase + idx, figures: 1 });
+      var m = H.makeRelief(mw, mh, { seed: metopeSeedBase + idx, figures: 1 });
+      m.scale.z = 3.4;
+      return m;
     } : null
   });
   entablature.position.y = 10.43;
   group.add(entablature);
 
-  // Pediments (figures pose toward the corners automatically)
-  var pedimentFront = H.makePediment(30.9, 1.2, 3.4, { figures: 11 });
+  // Pediments (figures pose toward the corners automatically). Director's r2
+  // review (v-parth-w/-se): the sparse 11-figure group left wide gaps of bare
+  // tympanum between figures, reading as "mostly empty" at normal viewing
+  // distance even though figures were technically present. 15 packs the
+  // triangular field the way the real pedimental sculpture groups do —
+  // Athena/Poseidon centre pair, kneeling attendants, reclining corner
+  // figures — with no gap wide enough to read as missing sculpture.
+  var pedimentFront = H.makePediment(30.9, 1.2, 3.4, { figures: 15 });
   pedimentFront.position.set(0, 13.73, 34.75);
   group.add(pedimentFront);
 
-  var pedimentBack = H.makePediment(30.9, 1.2, 3.4, { figures: 11 });
+  var pedimentBack = H.makePediment(30.9, 1.2, 3.4, { figures: 15 });
   pedimentBack.position.set(0, 13.73, -34.75);
   pedimentBack.rotation.y = Math.PI;
   group.add(pedimentBack);
@@ -3349,6 +3365,73 @@ window.buildErechtheion = function (THREE, mats, H) {
   var westColumns = H.makeIonicColumns(westPositions, { height: 5.8, baseD: 0.7, rotY: Math.PI / 2 });
   group.add(westColumns);
 
+  // Director's r2 review (v-cary/general envelope): the cella's plain coursed
+  // walls read as an unbroken mass with no doors, windows or clear boundary
+  // against the rocky plateau. Two framed window openings (dark recess plus a
+  // marble surround) in the bays between the west engaged columns, and a
+  // second monumental doorway on the north wall (the cella's only modelled
+  // door was the east one) give the building envelope real architectural
+  // punctuation without touching H.makeCella's shared wall generator.
+  // H.makeCella's west end wall is centred at x=-9.9 with thickness 0.8, so
+  // its true outer (west-facing) face sits at x=-10.3 — every added element
+  // below stays outside that (more negative x) so the solid coursed wall
+  // never occludes it.
+  var westFaceX = -10.3;
+  var winW = 1.0, winH = 2.3, winY = 3.0;
+  var westWinZs = [-2.66667, 2.66667];
+  var winJambGeo = new THREE.BoxGeometry(0.16, winH, 0.16);
+  var winCapGeo = new THREE.BoxGeometry(0.2, 0.18, winW + 0.32);
+  for (var wwi = 0; wwi < westWinZs.length; wwi++) {
+    var wz2 = westWinZs[wwi];
+    var winDark = new THREE.Mesh(new THREE.BoxGeometry(0.1, winH, winW), mats.rockDark);
+    winDark.position.set(westFaceX - 0.03, winY, wz2);
+    group.add(winDark);
+    var jambA = new THREE.Mesh(winJambGeo, mats.marble);
+    jambA.position.set(westFaceX - 0.08, winY, wz2 - winW / 2 - 0.08);
+    jambA.castShadow = true; jambA.receiveShadow = true;
+    group.add(jambA);
+    var jambB = new THREE.Mesh(winJambGeo, mats.marble);
+    jambB.position.set(westFaceX - 0.08, winY, wz2 + winW / 2 + 0.08);
+    jambB.castShadow = true; jambB.receiveShadow = true;
+    group.add(jambB);
+    var lintelTop = new THREE.Mesh(winCapGeo, mats.marble);
+    lintelTop.position.set(westFaceX - 0.08, winY + winH / 2 + 0.09, wz2);
+    lintelTop.castShadow = true; lintelTop.receiveShadow = true;
+    group.add(lintelTop);
+    var sill = new THREE.Mesh(winCapGeo, mats.marbleWorn);
+    sill.position.set(westFaceX - 0.08, winY - winH / 2 - 0.09, wz2);
+    sill.castShadow = true; sill.receiveShadow = true;
+    group.add(sill);
+  }
+
+  // Monumental North Doorway: entered from the North Porch, one of the most
+  // celebrated doors in Greek architecture — the cella above only modelled
+  // its east door, leaving the whole north face (behind the porch columns)
+  // blank. The north wall is centred at z=-5.4 with thickness 0.8, so its
+  // true outer (north/porch-facing) face is z=-5.8 — every element here
+  // stays outside that (more negative z).
+  var ndX = -7, ndW = 2.6, ndH = 4.4, ndFaceZ = -5.8;
+  var ndDark = new THREE.Mesh(new THREE.BoxGeometry(ndW, ndH, 0.12), mats.rockDark);
+  ndDark.position.set(ndX, ndH / 2, ndFaceZ - 0.03);
+  group.add(ndDark);
+  var ndJambGeo = new THREE.BoxGeometry(0.28, ndH, 0.3);
+  var ndJambA = new THREE.Mesh(ndJambGeo, mats.marble);
+  ndJambA.position.set(ndX - ndW / 2 - 0.14, ndH / 2, ndFaceZ - 0.08);
+  ndJambA.castShadow = true; ndJambA.receiveShadow = true;
+  group.add(ndJambA);
+  var ndJambB = new THREE.Mesh(ndJambGeo, mats.marble);
+  ndJambB.position.set(ndX + ndW / 2 + 0.14, ndH / 2, ndFaceZ - 0.08);
+  ndJambB.castShadow = true; ndJambB.receiveShadow = true;
+  group.add(ndJambB);
+  var ndLintel = new THREE.Mesh(new THREE.BoxGeometry(ndW + 0.7, 0.5, 0.34), mats.marble);
+  ndLintel.position.set(ndX, ndH + 0.25, ndFaceZ - 0.08);
+  ndLintel.castShadow = true; ndLintel.receiveShadow = true;
+  group.add(ndLintel);
+  var ndTrim = new THREE.Mesh(new THREE.BoxGeometry(ndW + 0.9, 0.12, 0.4), mats.marbleWorn);
+  ndTrim.position.set(ndX, ndH + 0.55, ndFaceZ - 0.08);
+  ndTrim.castShadow = true; ndTrim.receiveShadow = true;
+  group.add(ndTrim);
+
   // Olive tree at local (-13, 0, 4)
   var trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 2.6, 8), mats.trunk);
   trunk.position.set(-13, 1.3, 4);
@@ -3472,18 +3555,36 @@ window.buildPropylaea = function (THREE, mats, H) {
   var northCols = H.makeDoricColumns(northColPos, { height: 5.4, baseD: 1.0, topD: 0.8, simple: true });
   group.add(northCols);
 
-  var northRoofGeo = new THREE.BoxGeometry(12.6, 0.5, 10.6);
-  var northRoof = new THREE.Mesh(northRoofGeo, mats.marble);
-  northRoof.position.set(-8, 5.65, -16);
-  northRoof.castShadow = true; northRoof.receiveShadow = true;
+  // Director's r2 review (v-prop): a flat slab roof reads as a plain windowless
+  // box from every angle, and with the south wing the same height the whole
+  // complex silhouettes as one undifferentiated block. A proper gable (with
+  // pediment caps facing the wing's own entrance axis, north-south, matching
+  // the columns above) gives the Pinakotheke a distinct temple-like profile
+  // and a different ridge height from the central hall and the south wing.
+  var northRoof = H.makeGableRoof(12.6, 10.6, 0.24, { tiles: true });
+  northRoof.position.set(-8, 5.4, -16);
   group.add(northRoof);
+
+  var northPediment1 = H.makePediment(11.8, 0.5, 1.3, { figures: 0 });
+  northPediment1.position.set(-8, 5.4, -16 - 10.6 / 2);
+  group.add(northPediment1);
+
+  var northPediment2 = H.makePediment(11.8, 0.5, 1.3, { figures: 0 });
+  northPediment2.position.set(-8, 5.4, -16 + 10.6 / 2);
+  northPediment2.rotation.y = Math.PI;
+  group.add(northPediment2);
 
   // South wing centred at local (-8, 0, +17)
   var southBase = H.makeSteppedBase(9, 8, 2, 0.5);
   southBase.position.set(-8, 0, 17);
   group.add(southBase);
 
-  var southCella = H.makeCella(9, 8, 5.4, { doorWidth: 2.5, doorSide: '-z' });
+  // Director's r2 review (v-prop): south wing height dropped from 5.4 to 4.6
+  // (matched by its cella/column height below) so the two wings read as
+  // distinct chambers with their own roof lines rather than one uniform
+  // height repeated across the whole complex.
+  var southH = 4.6;
+  var southCella = H.makeCella(9, 8, southH, { doorWidth: 2.5, doorSide: '-z' });
   southCella.position.set(-8, 0, 17);
   group.add(southCella);
 
@@ -3492,14 +3593,21 @@ window.buildPropylaea = function (THREE, mats, H) {
     var x = -8 + (-3 + i * 3);
     southColPos.push([x, 17 - 4.5]);
   }
-  var southCols = H.makeDoricColumns(southColPos, { height: 5.4, baseD: 1.0, topD: 0.8, simple: true });
+  var southCols = H.makeDoricColumns(southColPos, { height: southH, baseD: 1.0, topD: 0.8, simple: true });
   group.add(southCols);
 
-  var southRoofGeo = new THREE.BoxGeometry(9.6, 0.5, 8.6);
-  var southRoof = new THREE.Mesh(southRoofGeo, mats.marble);
-  southRoof.position.set(-8, 5.65, 17);
-  southRoof.castShadow = true; southRoof.receiveShadow = true;
+  var southRoof = H.makeGableRoof(9.6, 8.6, 0.26, { tiles: true });
+  southRoof.position.set(-8, southH, 17);
   group.add(southRoof);
+
+  var southPediment1 = H.makePediment(8.8, 0.4, 1.1, { figures: 0 });
+  southPediment1.position.set(-8, southH, 17 - 8.6 / 2);
+  group.add(southPediment1);
+
+  var southPediment2 = H.makePediment(8.8, 0.4, 1.1, { figures: 0 });
+  southPediment2.position.set(-8, southH, 17 + 8.6 / 2);
+  southPediment2.rotation.y = Math.PI;
+  group.add(southPediment2);
 
   // NIKE BASTION AND TEMPLE centred at local (-15, 0, +26)
 

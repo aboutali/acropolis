@@ -101,18 +101,36 @@ window.buildPropylaea = function (THREE, mats, H) {
   var northCols = H.makeDoricColumns(northColPos, { height: 5.4, baseD: 1.0, topD: 0.8, simple: true });
   group.add(northCols);
 
-  var northRoofGeo = new THREE.BoxGeometry(12.6, 0.5, 10.6);
-  var northRoof = new THREE.Mesh(northRoofGeo, mats.marble);
-  northRoof.position.set(-8, 5.65, -16);
-  northRoof.castShadow = true; northRoof.receiveShadow = true;
+  // Director's r2 review (v-prop): a flat slab roof reads as a plain windowless
+  // box from every angle, and with the south wing the same height the whole
+  // complex silhouettes as one undifferentiated block. A proper gable (with
+  // pediment caps facing the wing's own entrance axis, north-south, matching
+  // the columns above) gives the Pinakotheke a distinct temple-like profile
+  // and a different ridge height from the central hall and the south wing.
+  var northRoof = H.makeGableRoof(12.6, 10.6, 0.24, { tiles: true });
+  northRoof.position.set(-8, 5.4, -16);
   group.add(northRoof);
+
+  var northPediment1 = H.makePediment(11.8, 0.5, 1.3, { figures: 0 });
+  northPediment1.position.set(-8, 5.4, -16 - 10.6 / 2);
+  group.add(northPediment1);
+
+  var northPediment2 = H.makePediment(11.8, 0.5, 1.3, { figures: 0 });
+  northPediment2.position.set(-8, 5.4, -16 + 10.6 / 2);
+  northPediment2.rotation.y = Math.PI;
+  group.add(northPediment2);
 
   // South wing centred at local (-8, 0, +17)
   var southBase = H.makeSteppedBase(9, 8, 2, 0.5);
   southBase.position.set(-8, 0, 17);
   group.add(southBase);
 
-  var southCella = H.makeCella(9, 8, 5.4, { doorWidth: 2.5, doorSide: '-z' });
+  // Director's r2 review (v-prop): south wing height dropped from 5.4 to 4.6
+  // (matched by its cella/column height below) so the two wings read as
+  // distinct chambers with their own roof lines rather than one uniform
+  // height repeated across the whole complex.
+  var southH = 4.6;
+  var southCella = H.makeCella(9, 8, southH, { doorWidth: 2.5, doorSide: '-z' });
   southCella.position.set(-8, 0, 17);
   group.add(southCella);
 
@@ -121,14 +139,21 @@ window.buildPropylaea = function (THREE, mats, H) {
     var x = -8 + (-3 + i * 3);
     southColPos.push([x, 17 - 4.5]);
   }
-  var southCols = H.makeDoricColumns(southColPos, { height: 5.4, baseD: 1.0, topD: 0.8, simple: true });
+  var southCols = H.makeDoricColumns(southColPos, { height: southH, baseD: 1.0, topD: 0.8, simple: true });
   group.add(southCols);
 
-  var southRoofGeo = new THREE.BoxGeometry(9.6, 0.5, 8.6);
-  var southRoof = new THREE.Mesh(southRoofGeo, mats.marble);
-  southRoof.position.set(-8, 5.65, 17);
-  southRoof.castShadow = true; southRoof.receiveShadow = true;
+  var southRoof = H.makeGableRoof(9.6, 8.6, 0.26, { tiles: true });
+  southRoof.position.set(-8, southH, 17);
   group.add(southRoof);
+
+  var southPediment1 = H.makePediment(8.8, 0.4, 1.1, { figures: 0 });
+  southPediment1.position.set(-8, southH, 17 - 8.6 / 2);
+  group.add(southPediment1);
+
+  var southPediment2 = H.makePediment(8.8, 0.4, 1.1, { figures: 0 });
+  southPediment2.position.set(-8, southH, 17 + 8.6 / 2);
+  southPediment2.rotation.y = Math.PI;
+  group.add(southPediment2);
 
   // NIKE BASTION AND TEMPLE centred at local (-15, 0, +26)
 
