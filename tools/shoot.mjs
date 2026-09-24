@@ -24,7 +24,7 @@ const THREE_CACHE = path.join(OUT, 'three.min.js');
 if (!fs.existsSync(THREE_CACHE)) execSync(`curl -sSfL -o "${THREE_CACHE}" https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js`);
 // Serve the repo over HTTP: WebGL textures and glTF fetches are blocked from file:// pages
 import http from 'node:http';
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.jpg': 'image/jpeg', '.png': 'image/png', '.glb': 'model/gltf-binary', '.json': 'application/json', '.bin': 'application/octet-stream' };
+const MIME = { '.gltf.json': 'application/json', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.jpg': 'image/jpeg', '.png': 'image/png', '.glb': 'model/gltf-binary', '.json': 'application/json', '.bin': 'application/octet-stream' };
 const server = http.createServer((req, res) => {
   const p = path.join(ROOT, decodeURIComponent(req.url.split('?')[0]));
   if (!p.startsWith(ROOT) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); return res.end(); }

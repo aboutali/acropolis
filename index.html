@@ -6281,7 +6281,8 @@ window.loadAssets = function (THREE, scene, mats, renderer, H) {
     }
     entry = modelCache[name] = { state: 'pending', asset: null, cbs: [cb] };
     loader.load(
-      BASE + name + '.glb',
+      // Self-contained glTF JSON (tools/glb2json.py): plain JSON hosts everywhere, .glb does not
+      BASE + name + '.gltf.json',
       function (gltf) {
         var mesh = null;
         gltf.scene.traverse(function (o) { if (!mesh && o.isMesh) mesh = o; });
@@ -6304,7 +6305,7 @@ window.loadAssets = function (THREE, scene, mats, renderer, H) {
       },
       undefined,
       function (err) {
-        console.error('loadAssets: failed to load ' + name + '.glb', err);
+        console.error('loadAssets: failed to load ' + name + '.gltf.json', err);
         entry.state = 'failed';
         entry.cbs.forEach(function (f) { f(null); });
       }
