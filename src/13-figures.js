@@ -677,8 +677,17 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var mat = o.material || matMarbleFig;
     var seed = o.seed !== undefined ? o.seed : (__figureAutoSeed += 17);
 
+    // Tag every procedural figure with the slot info 14-assets.js needs to
+    // find and replace it with a scanned model, without touching geometry.
+    function tagFigure(g) {
+      g.userData.slot = 'figure';
+      g.userData.pose = pose;
+      g.userData.height = height;
+      return g;
+    }
+
     if (pose === 'stand') {
-      return buildStandingBody(height, mat, seed, o).group;
+      return tagFigure(buildStandingBody(height, mat, seed, o).group);
     }
 
     if (pose === 'kneel') {
@@ -690,7 +699,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
         [new THREE.Vector3(0.06 * height, hipY, 0), new THREE.Vector3(0.09 * height, 0.20 * height, 0.22 * height), new THREE.Vector3(0.08 * height, 0.03 * height, 0.36 * height)]
       ];
       var b = buildBentBody(height, mat, seed, hipY, 0.86, legs);
-      return b.group;
+      return tagFigure(b.group);
     }
 
     if (pose === 'seated') {
@@ -700,7 +709,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
         [new THREE.Vector3(0.09 * height, seatHipY, 0), new THREE.Vector3(0.10 * height, seatHipY - 0.02 * height, 0.30 * height), new THREE.Vector3(0.09 * height, 0.05 * height, 0.34 * height)]
       ];
       var bs = buildBentBody(height, mat, seed, seatHipY, 0.80, legsS);
-      return bs.group;
+      return tagFigure(bs.group);
     }
 
     // recline: build the upright body then rotate it down onto its back so it runs along +x,
@@ -713,7 +722,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
     g.rotation.z = PI / 2;
     g.position.x += built.hipY;
     g.position.y += built.maxR * 0.95;
-    return g;
+    return tagFigure(g);
   };
 
   // ================= H.makeCaryatid =================
@@ -846,6 +855,10 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // overhangs and shadows them. Thickened the braid and started it a touch
     // lower, clear of the capital's underside, so it reads as a real coiled
     // mass against the back rather than disappearing into the join.
+    group.userData.slot = 'caryatid';
+    group.userData.height = height;
+    group.userData.index = callIdx;
+
     var braidTop = new THREE.Vector3(0, headY + headSize * 0.05, headSize * 0.90);
     for (var bi = -1; bi <= 1; bi += 2) {
       var top = braidTop.clone(); top.x = bi * headSize * 0.38;
@@ -1031,6 +1044,11 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var mesh = new THREE.Mesh(merged, mats.marbleRelief);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    mesh.userData.slot = 'relief';
+    mesh.userData.w = w;
+    mesh.userData.h = h;
+    mesh.userData.combat = combat;
+    mesh.userData.index = o.seed !== undefined ? o.seed : 1;
     return mesh;
   };
 
@@ -1056,6 +1074,9 @@ window.addFigureHelpers = function (THREE, mats, H) {
     cap.position.y = plinthH - 0.15;
     cap.castShadow = true; cap.receiveShadow = true;
     group.add(cap);
+
+    group.userData.slot = 'promachos';
+    group.userData.plinthH = plinthH;
 
     var height = 9;
     var mat = matBronzeFig;
