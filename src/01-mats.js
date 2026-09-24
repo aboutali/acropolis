@@ -188,7 +188,7 @@ window.buildMats = function (THREE) {
   if (!HAS_DOC) {
     function flat(hex, rough, metal) { return new THREE.MeshStandardMaterial({ color: hex, roughness: rough, metalness: metal || 0 }); }
     mats.marble = flat(0xe9decc, 0.72); mats.marbleWorn = flat(0xd6c9ac, 0.85); mats.marbleShadowed = flat(0xc4b89c, 0.88);
-    mats.rock = flat(0xa8a08f, 0.95); mats.rockDark = flat(0x8a8272, 0.97); mats.ground = flat(0xaca595, 0.98);
+    mats.rock = flat(0xb2aa99, 0.95); mats.rockDark = flat(0x767065, 0.97); mats.ground = flat(0xaca595, 0.98);
     mats.city = flat(0xcfc4ab, 0.9); mats.terracotta = flat(0xa05f46, 0.75); mats.bronze = flat(0x63503a, 0.4, 0.9);
     mats.foliageOlive = flat(0x6e7b57, 0.95); mats.foliageCypress = flat(0x38492f, 0.95); mats.trunk = flat(0x584634, 0.95);
     mats.marbleStatue = flat(0xe9e0c8, 0.5); mats.marbleRelief = flat(0xd6c9ac, 0.85); mats.bronzePatina = flat(0x5a7869, 0.7, 0.5);
@@ -313,7 +313,13 @@ window.buildMats = function (THREE) {
     // wood-grain planking rather than stone. Desaturated toward pale grey-ochre limestone (much
     // smaller stone/band spread: 26 vs the old 54) so the same texture reads as mottled ashlar at
     // both scales instead of striped boards.
-    var stone = [168, 160, 143], band = [139, 131, 114], crack = [80, 73, 62], lichen = [122, 133, 87];
+    // realism3 r1 art-director pass: stone was reading blown-out/pale in direct sun once the
+    // key light multiplied it -- lifted stone RGB back up (178,170,153) to restore color without
+    // reintroducing the old yellow (band/crack/lichen untouched in hue, so the stone-band spread
+    // widens slightly to 25; the bandMask blend weight below is cut further to compensate so this
+    // doesn't reopen the hard-stripe look). lichen restored toward the proportional desaturation
+    // ratio (~0.48x off the pre-realism3 tan values) that r1's edit had accidentally broken.
+    var stone = [178, 170, 153], band = [139, 131, 114], crack = [80, 73, 62], lichen = [130, 140, 100];
     // Fixed seeded phase offsets for the multi-frequency strata sines (deterministic hash, no RNG).
     var hp1 = hashP(1, 3, seed + 11, 97, 97) * 6.28318;
     var hp2 = hashP(5, 2, seed + 12, 97, 97) * 6.28318;
@@ -331,9 +337,17 @@ window.buildMats = function (THREE) {
         var vp1 = v * 5 + warpBig + warpSmall;
         var vp2 = v * 9 + warpBig * 1.3 + warpSmall * 0.6;
         var vp3 = v * 17 + warpSmall * 1.4;
-        var s1 = Math.sin(vp1 * Math.PI * 2 + hp1);
-        var s2 = Math.sin(vp2 * Math.PI * 2 + hp2) * 0.55;
-        var s3 = Math.sin(vp3 * Math.PI * 2 + hp3) * 0.3;
+        // realism3 r1: wall close-ups still read as fine corrugated/wood-grain stripes because
+        // small ashlar blocks (H.instance's shared unit BoxGeometry, native 0..1 face UV once
+        // rockDark lost its UV_SCALE entry) each show the WHOLE strata field -- all ~17 cycles of
+        // vp3 crammed into one short block face. The oscillation depth (not just the diffuse
+        // color blend below) also drives the height/normal map, so its bump shading was the
+        // dominant "planking" cue. Cut all three sine amplitudes 25% so a fully-compressed field
+        // reads as soft mottling rather than tight ridges, while cliffs (large uvScale override,
+        // only a small slice of the field per face) keep visible geological banding.
+        var s1 = Math.sin(vp1 * Math.PI * 2 + hp1) * 0.75;
+        var s2 = Math.sin(vp2 * Math.PI * 2 + hp2) * 0.55 * 0.75;
+        var s3 = Math.sin(vp3 * Math.PI * 2 + hp3) * 0.3 * 0.75;
         var stripeSum = clamp01((s1 + s2 + s3) / 1.85 * 0.5 + 0.5);
         var lo = 0.5 - 0.2 * thickness, hi = 0.5 + 0.2 * thickness;
         var bandMask = smooth(lo, hi, stripeSum) * breakMask;
@@ -355,12 +369,13 @@ window.buildMats = function (THREE) {
         var grain = fbmTile(u, v, seed + 55, 16, 16, 3, 0.5);
         height[i] = clamp01(0.5 + (bandMask - 0.5) * 0.45 + (grain - 0.5) * 0.4 - crackMask * 0.5 - jointMask * 0.5 - bandEdge * 0.4);
         rough[i] = clamp01(0.85 + crackMask * 0.1 + jointMask * 0.06 - lichenMask * 0.06 + (grain - 0.5) * 0.06);
-        // realism3: bandMask weight eased from 0.65 -> 0.4 so the horizontal strata read as a soft
-        // tonal shift (real bedding planes) rather than a hard-edged stripe -- the wood-pallet look
-        // was as much this contrast as the old tan hue. Cliffs (override uvScale=220) still read
-        // clearly stratified since the shadow-carrying jointMask/crackMask/bandEdge terms below are
-        // untouched; only the flat colour swing between courses is softened.
-        var c = lerpC(stone, band, bandMask * 0.4);
+        // realism3: bandMask weight eased 0.65 -> 0.4 -> 0.28 so the horizontal strata read as a
+        // soft tonal shift (real bedding planes) rather than a hard-edged stripe -- r1's close-up
+        // wall shots still showed residual banding inside individual ashlar blocks at 0.4. Cliffs
+        // (override uvScale=220) still read clearly stratified since the shadow-carrying
+        // jointMask/crackMask/bandEdge terms below are untouched; only the flat colour swing
+        // between courses is softened further.
+        var c = lerpC(stone, band, bandMask * 0.28);
         c = lerpC(c, crack, crackMask * 0.55);
         c = lerpC(c, crack, jointMask * 0.35);
         c = lerpC(c, lichen, lichenMask);
@@ -681,9 +696,24 @@ window.buildMats = function (THREE) {
   // ---------------------------------------------------------------
   // Real-world-scale tile sizes (metres per texture repeat), read by finishScene.
   // ---------------------------------------------------------------
+  // realism3 r1: rockDark's bare (non-clone) consumers are all H.instance() InstancedMesh ashlar
+  // -- 07-walls.js's wall courses/towers/bastion, 08-southslope's back walls/niches -- built from
+  // one shared unit BoxGeometry(1,1,1) per H.instance() call. With no uvScale entry at all
+  // (r0's fix), that geometry keeps its native per-face 0..1 box UV, so EVERY course maps the
+  // *entire* strata field (all ~17 vp3 cycles) onto its own ~1m-tall face -- exactly the fine
+  // repetitive corrugation the art director flagged as "residual horizontal strata banding" /
+  // wood-grain, no better than r0's screenshots showed. This is the same "tight regular ripple
+  // when box-projected onto a small/shallow surface at its native tile" bug 03-terrain.js's
+  // plateau/cliff overrides (150/220) and 08-southslope's apronMat (150) already work around --
+  // so give rockDark's own bare consumers the same fix: a large tile so the compressed crop each
+  // block sees only fine grain-level micro-variation, not full strata cycles. (finishScene's
+  // box-projected UV is identical for every instance under one InstancedMesh regardless of the
+  // chosen scale, since it's derived from the shared local geometry, not per-instance world
+  // position -- that per-instance limitation is the pre-existing "broader finishScene
+  // architecture" issue called out as out of scope; this only fixes which crop gets shown.)
   var UV_SCALE = {
     marble: 1.3, marbleWorn: 1.3, marbleShadowed: 1.4, marbleStatue: 0.9, marbleRelief: 1.3,
-    rock: 10, ground: 4, city: 4, terracotta: 1.4,
+    rock: 10, rockDark: 95, ground: 4, city: 4, terracotta: 1.4,
     bronze: 2, bronzePatina: 2, foliageOlive: 3, foliageCypress: 3, trunk: 1.1,
     gold: 1, ivory: 1.4, grass: 6, scrub: 4, plaster: 3,
   };
