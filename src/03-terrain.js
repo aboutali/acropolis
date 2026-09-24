@@ -106,6 +106,16 @@ window.buildTerrain = function (THREE, mats, H) {
     arr[i + 1] = plateauHeight(arr[i], arr[i + 2]);
   }
   pos.needsUpdate = true;
+  // The plane is rectangular but the summit is an ellipse: drop triangles past the cliff rim,
+  // whose drooping corners otherwise hang outside the cliff as pale sheets
+  (function () {
+    var idx = topGeo.index.array, keep = [];
+    function eOf(v) { var x = arr[v * 3] / 150, z = arr[v * 3 + 2] / 75; return Math.sqrt(x * x + z * z); }
+    for (var t = 0; t < idx.length; t += 3) {
+      if (eOf(idx[t]) < 1.03 && eOf(idx[t + 1]) < 1.03 && eOf(idx[t + 2]) < 1.03) keep.push(idx[t], idx[t + 1], idx[t + 2]);
+    }
+    topGeo.setIndex(keep);
+  })();
   topGeo.computeVertexNormals();
   paintVertexColors(topGeo, 700);
   var top = new THREE.Mesh(topGeo, weatheredMat(mats.rock, 700, 14));
@@ -275,7 +285,8 @@ window.buildTerrain = function (THREE, mats, H) {
         var k2n = (k2 + 1) % radial;
         var a0 = r2 * radial + k2, a1 = r2 * radial + k2n;
         var b0 = (r2 + 1) * radial + k2, b1 = (r2 + 1) * radial + k2n;
-        indices.push(a0, b0, b1, a0, b1, a1);
+        // Counter-clockwise seen from outside, so normals face out and the slope is not culled
+        indices.push(a0, b1, b0, a0, a1, b1);
       }
     }
     var geo = new THREE.BufferGeometry();

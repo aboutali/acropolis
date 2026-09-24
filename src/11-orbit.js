@@ -36,6 +36,7 @@ window.makeOrbit = function (THREE, camera, el, opts) {
   }
 
   function update(dt) {
+    applyKeys(dt || 0);
     if (autoRotate && pointers.size === 0 && performance.now() - lastInteract > 4000) {
       theta_t += 0.04 * dt;
     }
@@ -77,45 +78,59 @@ window.makeOrbit = function (THREE, camera, el, opts) {
     update(0);
   }
 
+  // Pan: move the orbit target across the ground plane, "grabbing" the world under the pointer
+  var panLimit = opts.panLimit !== undefined ? opts.panLimit : 1200;
+  function panBy(dxPx, dyPx) {
+    var h = el.clientHeight || 800;
+    var k = 2 * radius * Math.tan((camera.fov || 48) * Math.PI / 360) / h;
+    var rx = Math.cos(theta), rz = -Math.sin(theta);   // screen right, on the ground
+    var fx = -Math.sin(theta), fz = -Math.cos(theta);  // screen up, projected onto the ground
+    var fk = k / Math.max(0.35, Math.cos(Math.min(phi, 1.2)) + 0.35);
+    target_t.x += -dxPx * k * rx + dyPx * fk * fx;
+    target_t.z += -dxPx * k * rz + dyPx * fk * fz;
+    var ox = target_t.x + 45, oz = target_t.z, d = Math.sqrt(ox * ox + oz * oz);
+    if (d > panLimit) { target_t.x = -45 + ox * panLimit / d; target_t.z = oz * panLimit / d; d = panLimit; }
+    // Off the summit, let the target sink toward the plain so the view stays on the ground
+    var ex = ox / 150, ez = oz / 75, e2 = Math.sqrt(ex * ex + ez * ez);
+    if (e2 > 1) target_t.y = Math.max(-72, Math.min(target_t.y, 8 - (e2 - 1) * 160));
+    else if (target_t.y < 8 && e2 < 0.9) target_t.y = 8;
+    lastInteract = performance.now();
+  }
+
+  var panMode = false;
   function onPointerDown(e) {
     el.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    // Right or middle button, or Shift/Ctrl/Cmd with the left button, pans instead of orbiting
+    panMode = e.button === 2 || e.button === 1 || e.shiftKey || e.ctrlKey || e.metaKey;
     lastInteract = performance.now();
   }
 
   function onPointerMove(e) {
     if (!pointers.has(e.pointerId)) return;
-
-    var prevPointers = Array.from(pointers.entries());
-    var prevDist = null;
-    if (prevPointers.length === 2) {
-      var p1 = prevPointers[0][1];
-      var p2 = prevPointers[1][1];
-      prevDist = Math.sqrt((p2.x - p1.x) * (p2.x - p1.x) + (p2.y - p1.y) * (p2.y - p1.y));
-    }
-
-    var px = e.clientX;
-    var py = e.clientY;
     var oldP = pointers.get(e.pointerId);
-    var dx = px - oldP.x;
-    var dy = py - oldP.y;
+    var dx = e.clientX - oldP.x;
+    var dy = e.clientY - oldP.y;
 
     if (pointers.size === 1) {
-      theta_t -= dx * 0.005;
-      phi_t -= dy * 0.005;
-    } else if (pointers.size === 2) {
-      pointers.set(e.pointerId, { x: px, y: py });
-      var curPointers = Array.from(pointers.entries());
-      var p1 = curPointers[0][1];
-      var p2 = curPointers[1][1];
-      var curDist = Math.sqrt((p2.x - p1.x) * (p2.x - p1.x) + (p2.y - p1.y) * (p2.y - p1.y));
-      if (prevDist !== null && curDist > 0) {
-        radius_t *= prevDist / curDist;
+      if (panMode) panBy(dx, dy);
+      else {
+        theta_t -= dx * 0.005;
+        phi_t -= dy * 0.005;
       }
+    } else if (pointers.size === 2) {
+      // Two fingers: pinch zooms, moving both together pans
+      var prev = Array.from(pointers.values());
+      var prevDist = Math.hypot(prev[1].x - prev[0].x, prev[1].y - prev[0].y);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      var cur = Array.from(pointers.values());
+      var curDist = Math.hypot(cur[1].x - cur[0].x, cur[1].y - cur[0].y);
+      if (prevDist > 0 && curDist > 0) radius_t *= prevDist / curDist;
+      panBy(dx / 2, dy / 2);
       return;
     }
 
-    pointers.set(e.pointerId, { x: px, y: py });
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     lastInteract = performance.now();
   }
 
@@ -130,11 +145,40 @@ window.makeOrbit = function (THREE, camera, el, opts) {
     lastInteract = performance.now();
   }
 
+  // Keyboard: arrows or WASD pan, Q/E orbit, +/- zoom, while held
+  var keys = {};
+  function onKey(e) {
+    var t = e.target && e.target.tagName;
+    if (t === 'INPUT' || t === 'TEXTAREA') return;
+    var k = e.key.toLowerCase();
+    if ('wasdqe+-='.indexOf(k) >= 0 || k.indexOf('arrow') === 0) {
+      keys[k] = e.type === 'keydown';
+      if (e.type === 'keydown') { e.preventDefault(); lastInteract = performance.now(); }
+    }
+  }
+  function applyKeys(dt) {
+    var step = 600 * dt;
+    if (keys.arrowleft || keys.a) panBy(step, 0);
+    if (keys.arrowright || keys.d) panBy(-step, 0);
+    if (keys.arrowup || keys.w) panBy(0, step);
+    if (keys.arrowdown || keys.s) panBy(0, -step);
+    if (keys.q) theta_t += 1.2 * dt;
+    if (keys.e) theta_t -= 1.2 * dt;
+    if (keys['+'] || keys['=']) radius_t *= 1 - 1.2 * dt;
+    if (keys['-']) radius_t *= 1 + 1.2 * dt;
+  }
+
   el.addEventListener('pointerdown', onPointerDown);
   el.addEventListener('pointermove', onPointerMove);
   el.addEventListener('pointerup', onPointerUp);
   el.addEventListener('pointercancel', onPointerUp);
   el.addEventListener('wheel', onWheel, { passive: false });
+  el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKey);
+    window.addEventListener('blur', function () { keys = {}; });
+  }
 
   update(0);
 

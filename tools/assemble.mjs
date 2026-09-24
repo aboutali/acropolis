@@ -34,7 +34,7 @@ const html = `<title>Acropolis of Athens</title>
   #legend ul { margin: 0; padding: 0; list-style: none; }
   #legend li::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; background: var(--dot, #e8e0cf); vertical-align: middle; }
   #hint { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 12px; border-radius: 999px; background: var(--panel);
-    backdrop-filter: blur(6px); font-size: 12px; white-space: nowrap; transition: opacity 1.2s ease; pointer-events: none; }
+    backdrop-filter: blur(6px); font-size: 12px; max-width: calc(100vw - 32px); box-sizing: border-box; text-align: center; transition: opacity 1.2s ease; pointer-events: none; }
   #autorot { position: fixed; right: 12px; bottom: 12px; width: 44px; height: 44px; border: 0; border-radius: 50%; background: var(--panel);
     color: var(--ink); font-size: 20px; cursor: pointer; backdrop-filter: blur(6px); }
   #autorot.off { opacity: .5; }
@@ -61,7 +61,7 @@ const html = `<title>Acropolis of Athens</title>
   <p class="credits">Sculpture scans: Parthenon Sculpture Gallery, USC ICT, Skulpturhalle Basel, ISTI-CNR Pisa (CC BY 4.0). Textures: Poly Haven, ambientCG (CC0).</p>
   </ul>
 </div>
-<div id="hint">drag to orbit · pinch to zoom · tap a name to fly</div>
+<div id="hint">drag: orbit · right-drag, shift-drag, two fingers or arrows: move · scroll or pinch: zoom · tap a name to fly</div>
 <button id="autorot" aria-pressed="true" title="Toggle auto-rotate">⟳</button>
 <div id="debug" hidden></div>
 <script src="${THREE_URL}"></script>
