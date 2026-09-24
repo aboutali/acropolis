@@ -211,7 +211,10 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // segments (a handful of extra triangles per head) so the carved sockets and
     // mouth groove below have enough vertex density to actually show up.
     var lowRes = !!opts.lowRes || MOBILE;
-    var seg = lowRes ? 12 : 15;
+    // opts.seg: explicit override for hero figures (the Erechtheion caryatids)
+    // that deserve finer facial carving than the pediment-figure default; every
+    // existing caller leaves this unset and keeps the lowRes/15 behaviour below.
+    var seg = opts.seg || (lowRes ? 12 : 15);
     var geo = new THREE.SphereGeometry(size, seg, Math.max(6, seg - 4));
     var pos = geo.getAttribute('position');
     var arr = pos.array;
@@ -823,16 +826,65 @@ window.addFigureHelpers = function (THREE, mats, H) {
           bust += 0.052 * height * bustFall * nearBustTheta;
         }
 
-        return kneeBulge + seamPull + bust;
+        // Director's r2 render check (v-cary): the raw fold field at the
+        // shoulder can crest at roughly 2x the base radius (vFold * bias *
+        // ampMod stack up multiplicatively), which swallowed the arm stubs
+        // below no matter how far outside rShoulder they were anchored.
+        // Carve a shallow flattened channel into the fold field at both
+        // shoulders (theta 0 and PI, where the arms attach) so they sit
+        // against a comparatively low-relief patch instead of fighting an
+        // unpredictable fold crest.
+        var shoulderFrac = shoulderY / neckBaseY;
+        var nearShoulderY = gaussFall(yFrac - shoulderFrac, 0.14);
+        var armChannel = 0;
+        for (var aSide = -1; aSide <= 1; aSide += 2) {
+          var armTheta = aSide > 0 ? 0 : PI;
+          var nearArmTheta = gaussFall(((theta - armTheta + PI) % (2 * PI)) - PI, 0.55);
+          armChannel -= 0.24 * nearShoulderY * nearArmTheta;
+        }
+
+        return kneeBulge + seamPull + bust + armChannel;
       }
     });
     group.add(body);
 
-    // stub arms at the sides (forearms broken off, as on the surviving Caryatids)
-    var armR = 0.052 * height;
+    // Arms: one side hangs straight at the hip (broken off below the elbow, as
+    // on most surviving originals), the other bends at the elbow and crosses
+    // in front to gather the peplos — the one pose element every photographed
+    // Caryatid shares, and the reason the previous pair of near-identical,
+    // barely-offset stubs never read as arms at all (they sat almost flush
+    // against the torso silhouette). The bent arm alternates with supportSide
+    // so the row doesn't repeat the same silhouette six times.
+    // rShoulder/rHip below are absolute metres (this profile's own radius
+    // scale, not a height-relative fraction), so every arm offset here is
+    // kept in that same absolute scale. The armChannel carved into the body's
+    // bulge() above (see the profile's foldedLathe call) flattens the fold
+    // field at theta 0/PI near shoulder height, so these modest offsets clear
+    // the drapery instead of being swallowed by an unpredictable fold crest.
+    var armR = 0.072 * height;
     var stubShY = shoulderY - 0.02 * height;
-    group.add(taperedLimb(new THREE.Vector3(-rShoulder * 0.85, stubShY, 0), new THREE.Vector3(-rShoulder * 1.05, stubShY - 0.14 * height, 0.02 * height), armR, armR * 0.8, MOBILE ? 6 : 8, mat));
-    group.add(taperedLimb(new THREE.Vector3(rShoulder * 0.85, stubShY, 0), new THREE.Vector3(rShoulder * 1.05, stubShY - 0.14 * height, 0.02 * height), armR, armR * 0.8, MOBILE ? 6 : 8, mat));
+    var bentSide = -supportSide, straightSide = supportSide;
+
+    // straight arm: shoulder to a stub past the elbow (forearm broken off, as
+    // on most surviving originals), anchored outside the (now-flattened)
+    // shoulder radius so it casts its own separating shadow line instead of
+    // blending into the body.
+    group.add(taperedLimb(
+      new THREE.Vector3(straightSide * (rShoulder + 0.10), stubShY, -0.05 * height),
+      new THREE.Vector3(straightSide * (rShoulder + 0.16), stubShY - 0.30 * height, 0.02 * height),
+      armR, armR * 0.66, MOBILE ? 7 : 10, mat));
+
+    // bent arm: upper arm shoulder->elbow, forearm elbow->hand reaching to the
+    // front (-z) of the skirt to gather the peplos — the one pose element
+    // every photographed Caryatid shares. The free-leg side (where this arm
+    // and hand sit) also carries the lighter fold bias (vFoldBiasTheta favours
+    // the weight-bearing side), so the raw fold crest there is well below the
+    // shoulder-side worst case.
+    var elbow = new THREE.Vector3(bentSide * (rShoulder + 0.14), shoulderY - 0.20 * height, -0.16);
+    var hand = new THREE.Vector3(bentSide * rHip * 0.55, shoulderY - 0.34 * height, -0.42);
+    group.add(taperedLimb(new THREE.Vector3(bentSide * (rShoulder + 0.09), stubShY, 0), elbow, armR, armR * 0.85, MOBILE ? 7 : 10, mat));
+    group.add(taperedLimb(elbow, hand, armR * 0.82, armR * 0.55, MOBILE ? 6 : 9, mat));
+    group.add(ballMesh(armR * 0.62, MOBILE ? 6 : 8, mat, hand));
 
     var neck = taperedLimb(new THREE.Vector3(0, neckBaseY, 0), new THREE.Vector3(0, neckBaseY + 0.035 * height, 0), rNeck, rNeck * 0.95, MOBILE ? 8 : 10, mat);
     group.add(neck);
@@ -842,11 +894,22 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // sculpts hair volume/hairline straight into the head sphere itself (no
     // extra geometry, so nothing can clip), pushed harder than the default for
     // a heavier coiffure to match the heavy braids down the back.
-    var headGroup = makeHead(headSize, { material: mat, hair: false, hairBack: 2.2 });
+    // seg: bumped from makeHead's default 15 to 20 for these hero figures —
+    // they're seen close (v-cary) unlike the pediment/relief figures the
+    // default is tuned for, so the extra facial resolution is worth the small
+    // per-head triangle cost across only 6 statues.
+    var headGroup = makeHead(headSize, { material: mat, hair: false, hairBack: 2.2, seg: MOBILE ? 12 : 20 });
     var headY = neckBaseY + 0.035 * height + headSize * 0.9;
     headGroup.position.y = headY;
-    // a small per-figure head turn so the row doesn't read as identical pegs
-    headGroup.rotation.y = supportSide * 0.10 + (rnd() - 0.5) * 0.14;
+    // Bug fix: makeHead sculpts the face (brow/eyes/nose/chin) onto its own
+    // +z hemisphere, but this module's body (bust bulge, fold bias, braids)
+    // is built front = -z as documented above. Without a 180 degree turn the
+    // carved face ended up on the same side as the braids — i.e. facing into
+    // the building, away from every approach — which is why the heads read as
+    // blank domes in the v-cary render despite the sculpted features existing
+    // in the geometry. The PI turn brings the face around to the body's -z
+    // front; the existing small per-figure turn still varies the row.
+    headGroup.rotation.y = PI + supportSide * 0.10 + (rnd() - 0.5) * 0.14;
     group.add(headGroup);
 
     // long, thick braids down the back (front faces -z, so the back is +z).

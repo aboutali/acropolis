@@ -12,6 +12,11 @@ window.buildParthenon = function (THREE, mats, H) {
   var group = new THREE.Group();
   // Raise the building so its three steps stand above the plateau
   group.position.y = 1.65;
+  // Real Parthenon's 70m axis runs east-west with the entrance facing east;
+  // the geometry below is authored long-axis-along-z with the entrance
+  // (pronaos/front pediment) on local +z, so rotate 90 deg about y to send
+  // local +z to world +x (east).
+  group.rotation.y = Math.PI / 2;
 
   // Crepidoma: three steps, with the top (stylobate) step curving gently
   // upward toward mid-length (H.makeSteppedBase applies this automatically

@@ -307,9 +307,37 @@ window.buildTerrain = function (THREE, mats, H) {
   group.add(cliffMesh);
 
   // Ground plain
-  // Reaches past the distant hills (up to ~5.5 km) so they stand on ground
-  var groundGeo = new THREE.PlaneGeometry(16000, 16000, 2, 2);
+  // Reaches past the distant hills (up to ~5.5 km) so they stand on ground. Subdivided (was a
+  // bare 2x2 slab) and given broad vertex-colour patches (dusty soil / scrub-green / dry-brown)
+  // plus a very gentle rolling undulation, so the huge stretch of plain visible past the city in
+  // wide shots reads as real countryside instead of one flat uniform beige sheet. The undulation
+  // is held at zero out to well past the city's own footprint (maxR below) and only grows beyond
+  // that, so no modelled building/tree ever floats or sinks relative to its own "flat -80" ground.
+  var groundSeg = MOBILE ? 44 : 90;
+  var groundGeo = new THREE.PlaneGeometry(16000, 16000, groundSeg, groundSeg);
   groundGeo.rotateX(-PI / 2);
+  function mixC(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+  var gPos = groundGeo.attributes.position, gArr = gPos.array;
+  var gCol = new Float32Array(gPos.count * 3);
+  var gSoil = [0.62, 0.58, 0.49], gGreen = [0.42, 0.46, 0.32], gDry = [0.56, 0.48, 0.36];
+  for (var gi = 0; gi < gArr.length; gi += 3) {
+    var gx = gArr[gi], gz = gArr[gi + 2];
+    var dxh = gx - CX, dzh = gz - CZ, distH = sqrt(dxh * dxh + dzh * dzh);
+    var patch = H.noise2(gx * 0.0007, gz * 0.0009, 61);
+    var fine = H.noise2(gx * 0.0035, gz * 0.003, 62);
+    var green = clamp01((patch + 1) * 0.42 + (fine + 1) * 0.08);
+    var dry = clamp01(((fine + 1) * 0.5 - 0.5) * 0.7);
+    var gc = mixC(gSoil, gGreen, green);
+    gc = mixC(gc, gDry, dry);
+    gCol[gi] = gc[0]; gCol[gi + 1] = gc[1]; gCol[gi + 2] = gc[2];
+    var rollFade = smoothstep01(1250, 2700, distH);
+    var roll = 0.55 * H.noise2(gx * 0.0009, gz * 0.0011, 63) + 0.45 * H.noise2(gx * 0.0022, gz * 0.0019, 64);
+    gArr[gi + 1] = roll * 5.5 * rollFade;
+  }
+  gPos.needsUpdate = true;
+  groundGeo.computeVertexNormals();
+  groundGeo.setAttribute('color', new THREE.Float32BufferAttribute(gCol, 3));
+  mats.ground.vertexColors = true; // sole consumer of mats.ground, safe to flip in place
   var groundMesh = new THREE.Mesh(groundGeo, mats.ground);
   groundMesh.position.y = -80.4;
   groundMesh.receiveShadow = true;
@@ -329,9 +357,12 @@ window.buildTerrain = function (THREE, mats, H) {
   // anyway): at the higher counts here, even the previous build's occasional stragglers that
   // rode the talus's own noisy outer flare out toward the plain became numerous enough to read
   // as scrub scattered into the city plaza, so pines/scrub are kept to the upper cliff+talus face.
-  var pineCount = MOBILE ? 55 : 195;
+  // Range widened (was 0.32-0.68) and counts raised so this band now reaches all the way out to
+  // the city's own (also widened, see CITY greenbelt below) start radius -- a real forested
+  // greenbelt hugs the rock before the streets begin, not a hard cut from bare talus to houses.
+  var pineCount = MOBILE ? 65 : 225;
   for (var p = 0; p < pineCount; p++) {
-    var pa = hillR() * PI * 2, pt = 0.32 + hillR() * 0.36;
+    var pa = hillR() * PI * 2, pt = 0.32 + hillR() * 0.53;
     var m = cliffRadiusMul(pt, pa, 5);
     var px = CX + cos(pa) * RX * m, pz = CZ + sin(pa) * RZ * m, py = cliffY(pt);
     var psc = 0.55 + hillR() * 1.05; // wider height range -> more silhouette variation
@@ -342,9 +373,9 @@ window.buildTerrain = function (THREE, mats, H) {
     var pcx = 0.8 + hillR() * 0.5, pcz = 0.8 + hillR() * 0.5;
     pineCanopyT.push({ p: [px, py + 2.9 * psc, pz], r: [0, hillR() * PI * 2, 0], s: [psc * 1.1 * pcx, psc * (0.5 + hillR() * 0.25), psc * 1.1 * pcz] });
   }
-  var clusterCount = MOBILE ? 90 : 290;
+  var clusterCount = MOBILE ? 100 : 300;
   for (var sc = 0; sc < clusterCount; sc++) {
-    var sa = hillR() * PI * 2, st = 0.38 + hillR() * 0.34;
+    var sa = hillR() * PI * 2, st = 0.38 + hillR() * 0.48;
     var sm = cliffRadiusMul(st, sa, 5);
     var sx = CX + cos(sa) * RX * sm, sz = CZ + sin(sa) * RZ * sm, sy = cliffY(st);
     var clumpN = 3 + ((hillR() * 4) | 0);
@@ -468,10 +499,10 @@ window.buildTerrain = function (THREE, mats, H) {
   // variants desaturated toward grey-green to read as aged/mossy) so roofs stop reading as one
   // identical geometry+colour repeated everywhere.
   var roofVariantDefs = [
-    { geo: hipGeo, color: [0.91, 0.38, 0.17] },   // hip, saturated warm terracotta (+hue)
+    { geo: hipGeo, color: [0.85, 0.42, 0.22] },   // hip, warm terracotta (toned down from neon-orange)
     { geo: hipGeo, color: [0.80, 0.50, 0.20] },   // hip, standard clay
     { geo: hipGeo, color: [0.70, 0.56, 0.34] },   // hip, sun-bleached pale (-hue/desaturated)
-    { geo: flatGeo, color: [0.74, 0.68, 0.56] },  // flat modern concrete cap, warm sand
+    { geo: flatGeo, color: [0.83, 0.80, 0.72] },  // flat modern concrete cap, pale/whitewashed
     { geo: flatGeo, color: [0.56, 0.58, 0.50] },  // flat cap, weathered grey-green (desaturated)
     { geo: damagedGeo, color: [0.52, 0.46, 0.30] } // damaged/mossy, desaturated + green-shifted
   ];
@@ -481,8 +512,13 @@ window.buildTerrain = function (THREE, mats, H) {
     return m;
   });
   var roofBuckets = [[], [], [], [], [], []];
-  // Cumulative probabilities: ~45% hip (pristine tile), ~35% flat (modern), ~20% damaged/mossy.
-  var roofCum = [0.15, 0.30, 0.45, 0.625, 0.80, 1.0];
+  // Cumulative probabilities: ~25% hip (pristine tile), ~55% flat (modern -- the commonest real
+  // Athens roof), ~20% damaged/mossy. Was ~45% hip, which (all three hip variants being some
+  // shade of saturated orange/terracotta, the one roof shape with a strong silhouette) made the
+  // whole city read as a uniform field of orange pyramids at a distance even though the flat/
+  // damaged variants were already there -- they just don't register as a distinct shape from far
+  // away the way a pointed hip roof does.
+  var roofCum = [0.10, 0.18, 0.25, 0.50, 0.80, 1.0];
   function roofVariantAt(hx, hz) {
     var n = (H.noise2(hx * 0.018, hz * 0.021, 601) * 0.5 + 0.5);
     for (var vi2 = 0; vi2 < roofCum.length; vi2++) if (n < roofCum[vi2]) return vi2;
@@ -490,7 +526,7 @@ window.buildTerrain = function (THREE, mats, H) {
   }
   // Tree clumps and small parks woven into the city fabric.
   var treeTrunkGeo = new THREE.CylinderGeometry(0.12, 0.18, 1.6, 5);
-  var treeCanopyGeo = new THREE.IcosahedronGeometry(0.85, 0);
+  var treeCanopyGeo = new THREE.IcosahedronGeometry(1.5, 0); // bigger crown -- pure scale, reads at distance
   var parkGeo = new THREE.BoxGeometry(1, 1, 1);
   var cityTreeTrunkT = [], cityTreeCanopyT = [], parkT = [];
 
@@ -517,9 +553,12 @@ window.buildTerrain = function (THREE, mats, H) {
   // gaps between blocks read as walked/paved paths rather than plain bare sand.
   var streetGeo = new THREE.BoxGeometry(1, 1, 1);
   var streetT = [];
+  // Widened from (160,85) so a real forested greenbelt (the hillside pine/scrub band above, whose
+  // range was extended to match) separates the rock from the streets, instead of houses starting
+  // almost the moment the talus ends.
   function ellipseE(hx, hz) {
     var dx = hx + 45, dz = hz;
-    return (dx / 160) * (dx / 160) + (dz / 85) * (dz / 85);
+    return (dx / 215) * (dx / 215) + (dz / 112) * (dz / 112);
   }
   // Occupancy fraction beyond the mid tier: a smooth 3-step fade (~100% -> ~55% intermediate ->
   // ~30% at the haze edge) instead of the old hard jump from a fully-filled far tier straight to
@@ -569,8 +608,13 @@ window.buildTerrain = function (THREE, mats, H) {
         }
         continue;
       }
+      // Tree-clump/park odds are higher near the hill and taper with distance, so the city fabric
+      // itself carries visibly more greenery close in (real Plaka courtyards + the archaeological
+      // park's edge) instead of a flat 3.5%/1.5% everywhere.
+      var treeChance = rr < 260 ? 0.09 : rr < 620 ? 0.05 : 0.02;
+      var parkChance = rr < 260 ? 0.045 : rr < 620 ? 0.02 : 0.01;
       var special = cityR();
-      if (special < 0.035) {
+      if (special < treeChance) {
         // Tree clump instead of a house
         var tsc = 0.8 + cityR() * 0.7;
         cityTreeTrunkT.push({ p: [hx, 0.8 * tsc - 80, hz], s: [tsc, tsc, tsc] });
@@ -578,7 +622,7 @@ window.buildTerrain = function (THREE, mats, H) {
           var loA = (lobe / 3) * PI * 2 + cityR();
           cityTreeCanopyT.push({ p: [hx + cos(loA) * 0.7 * tsc, (1.7 + cityR() * 0.5) * tsc - 80, hz + sin(loA) * 0.7 * tsc], s: [tsc * 0.8, tsc * 0.7, tsc * 0.8] });
         }
-      } else if (special < 0.05) {
+      } else if (special < treeChance + parkChance) {
         // Small park: a flat green patch with a couple of trees
         parkT.push({ p: [hx, -80 + 0.03, hz], r: [0, yaw, 0], s: [cell * 0.9, 0.06, cell * 0.9] });
         for (var pt2 = 0; pt2 < 2; pt2++) {
@@ -588,6 +632,10 @@ window.buildTerrain = function (THREE, mats, H) {
           cityTreeCanopyT.push({ p: [pox, 1.9 * ptsc - 80, poz], s: [ptsc * 0.8, ptsc * 0.7, ptsc * 0.8] });
         }
       } else if (rr < 260) {
+        // Coarse, spatially-coherent (noise, not per-cell coin-flip) open patches -- small plazas,
+        // vacant lots, wider courtyards -- so the near-tier grid isn't a literal 100%-filled carpet
+        // of houses between the streets.
+        if (H.noise2(hx * 0.02, hz * 0.022, 811) > 0.62) continue;
         // Near tier: full 1-6 story range with real variety -- ~40% single-storey cottages,
         // ~40% ordinary 2-3.5 storey houses, ~20% tall 4-6 storey buildings.
         var roll1 = cityR(), stories1;
@@ -598,6 +646,8 @@ window.buildTerrain = function (THREE, mats, H) {
         houseT.push({ p: [hx, -80 + syh / 2, hz], r: [0, yaw, 0], s: [sxh, syh, szh] });
         roofBuckets[roofVariantAt(hx, hz)].push({ p: [hx, -80 + syh + 0.3 * ((sxh + szh) / 2) * 0.35, hz], r: [0, yaw, 0], s: [(sxh + szh) / 2 * 1.05, (sxh + szh) / 2 * 0.9, (sxh + szh) / 2 * 1.05] });
       } else if (rr < 620) {
+        // Same coarse open-patch mask, sparser than the near tier so the mid tier still reads dense.
+        if (H.noise2(hx * 0.014, hz * 0.016, 812) > 0.72) continue;
         // Mid tier: kept to 1-2 storeys per the art pass, so height variety concentrates near the hill.
         var stories2 = 1 + cityR() * 1.1;
         var sx2 = 6 + cityR() * 11, sz2 = 6 + cityR() * 11, sy2 = stories2 * storyH;
@@ -620,6 +670,35 @@ window.buildTerrain = function (THREE, mats, H) {
     }
     rr += cell;
   }
+
+  // ---------------- Urban forest scatter: canopies rising between the rooftops ----------------
+  // A real city core this close to a major green space/archaeological park isn't wall-to-wall
+  // building -- courtyards, street trees and small squares thread all through it (see any real
+  // aerial of the Plaka/Makrygianni district). This scatter is independent of the grid above --
+  // positions can and do land on top of a house footprint, which is correct: a canopy poking up
+  // between buildings, not a gap in them. Cheap octahedron canopies (8 tris) bias toward the hill
+  // and taper out with distance, same gradient as the grid's own tree/park special tiles.
+  var forestR = lcg(419);
+  // Crown/trunk sized like a real 5-8m-wide tree (was a near-invisible 1-2m at this view distance
+  // -- pure scale, no extra geometry cost) so the scatter actually registers in wide shots instead
+  // of disappearing to sub-pixel specks between the rooftops.
+  var forestCanopyGeo = new THREE.OctahedronGeometry(2.3, 0);
+  var forestTrunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 2.4, 5);
+  var forestTrunkT = [], forestOliveT = [], forestCypressT = [];
+  var forestCount = MOBILE ? 150 : 430;
+  for (var fo = 0; fo < forestCount; fo++) {
+    var fa = forestR() * PI * 2;
+    // Weighted toward inner radii (denser near the hill, thinning outward), capped at the mid
+    // tier's own outer edge so this stays a "green city core" effect, not a forest at the haze.
+    var fr = 55 + Math.pow(forestR(), 0.65) * 560;
+    var fhx = -45 + cos(fa) * fr, fhz = sin(fa) * fr;
+    if (ellipseE(fhx, fhz) < 1) continue; // keep off the hill itself
+    var fsc = 0.85 + forestR() * 0.95;
+    forestTrunkT.push({ p: [fhx, -80 + 0.7 * fsc, fhz], s: [fsc, fsc, fsc] });
+    var fCanopy = { p: [fhx, -80 + 1.6 * fsc, fhz], r: [0, forestR() * PI * 2, 0], s: [fsc, fsc * (0.85 + forestR() * 0.3), fsc] };
+    if (forestR() < 0.6) forestOliveT.push(fCanopy); else forestCypressT.push(fCanopy);
+  }
+
   var cityGroup = new THREE.Group();
   cityGroup.add(H.instance(bodyGeo, mats.plaster, houseT));
   for (var rv = 0; rv < roofVariantDefs.length; rv++) {
@@ -636,6 +715,9 @@ window.buildTerrain = function (THREE, mats, H) {
     cityGroup.add(H.instance(streetGeo, streetMat, streetT));
   }
   if (cityTreeTrunkT.length) cityGroup.add(H.instance(treeTrunkGeo, mats.trunk, cityTreeTrunkT));
+  if (forestTrunkT.length) cityGroup.add(H.instance(forestTrunkGeo, mats.trunk, forestTrunkT));
+  if (forestOliveT.length) cityGroup.add(H.instance(forestCanopyGeo, mats.foliageOlive, forestOliveT));
+  if (forestCypressT.length) cityGroup.add(H.instance(forestCanopyGeo, mats.foliageCypress, forestCypressT));
   if (cityTreeCanopyT.length) cityGroup.add(H.instance(treeCanopyGeo, mats.foliageCypress, cityTreeCanopyT));
   group.add(cityGroup);
 

@@ -2528,9 +2528,37 @@ window.buildTerrain = function (THREE, mats, H) {
   group.add(cliffMesh);
 
   // Ground plain
-  // Reaches past the distant hills (up to ~5.5 km) so they stand on ground
-  var groundGeo = new THREE.PlaneGeometry(16000, 16000, 2, 2);
+  // Reaches past the distant hills (up to ~5.5 km) so they stand on ground. Subdivided (was a
+  // bare 2x2 slab) and given broad vertex-colour patches (dusty soil / scrub-green / dry-brown)
+  // plus a very gentle rolling undulation, so the huge stretch of plain visible past the city in
+  // wide shots reads as real countryside instead of one flat uniform beige sheet. The undulation
+  // is held at zero out to well past the city's own footprint (maxR below) and only grows beyond
+  // that, so no modelled building/tree ever floats or sinks relative to its own "flat -80" ground.
+  var groundSeg = MOBILE ? 44 : 90;
+  var groundGeo = new THREE.PlaneGeometry(16000, 16000, groundSeg, groundSeg);
   groundGeo.rotateX(-PI / 2);
+  function mixC(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+  var gPos = groundGeo.attributes.position, gArr = gPos.array;
+  var gCol = new Float32Array(gPos.count * 3);
+  var gSoil = [0.62, 0.58, 0.49], gGreen = [0.42, 0.46, 0.32], gDry = [0.56, 0.48, 0.36];
+  for (var gi = 0; gi < gArr.length; gi += 3) {
+    var gx = gArr[gi], gz = gArr[gi + 2];
+    var dxh = gx - CX, dzh = gz - CZ, distH = sqrt(dxh * dxh + dzh * dzh);
+    var patch = H.noise2(gx * 0.0007, gz * 0.0009, 61);
+    var fine = H.noise2(gx * 0.0035, gz * 0.003, 62);
+    var green = clamp01((patch + 1) * 0.42 + (fine + 1) * 0.08);
+    var dry = clamp01(((fine + 1) * 0.5 - 0.5) * 0.7);
+    var gc = mixC(gSoil, gGreen, green);
+    gc = mixC(gc, gDry, dry);
+    gCol[gi] = gc[0]; gCol[gi + 1] = gc[1]; gCol[gi + 2] = gc[2];
+    var rollFade = smoothstep01(1250, 2700, distH);
+    var roll = 0.55 * H.noise2(gx * 0.0009, gz * 0.0011, 63) + 0.45 * H.noise2(gx * 0.0022, gz * 0.0019, 64);
+    gArr[gi + 1] = roll * 5.5 * rollFade;
+  }
+  gPos.needsUpdate = true;
+  groundGeo.computeVertexNormals();
+  groundGeo.setAttribute('color', new THREE.Float32BufferAttribute(gCol, 3));
+  mats.ground.vertexColors = true; // sole consumer of mats.ground, safe to flip in place
   var groundMesh = new THREE.Mesh(groundGeo, mats.ground);
   groundMesh.position.y = -80.4;
   groundMesh.receiveShadow = true;
@@ -2550,9 +2578,12 @@ window.buildTerrain = function (THREE, mats, H) {
   // anyway): at the higher counts here, even the previous build's occasional stragglers that
   // rode the talus's own noisy outer flare out toward the plain became numerous enough to read
   // as scrub scattered into the city plaza, so pines/scrub are kept to the upper cliff+talus face.
-  var pineCount = MOBILE ? 55 : 195;
+  // Range widened (was 0.32-0.68) and counts raised so this band now reaches all the way out to
+  // the city's own (also widened, see CITY greenbelt below) start radius -- a real forested
+  // greenbelt hugs the rock before the streets begin, not a hard cut from bare talus to houses.
+  var pineCount = MOBILE ? 65 : 225;
   for (var p = 0; p < pineCount; p++) {
-    var pa = hillR() * PI * 2, pt = 0.32 + hillR() * 0.36;
+    var pa = hillR() * PI * 2, pt = 0.32 + hillR() * 0.53;
     var m = cliffRadiusMul(pt, pa, 5);
     var px = CX + cos(pa) * RX * m, pz = CZ + sin(pa) * RZ * m, py = cliffY(pt);
     var psc = 0.55 + hillR() * 1.05; // wider height range -> more silhouette variation
@@ -2563,9 +2594,9 @@ window.buildTerrain = function (THREE, mats, H) {
     var pcx = 0.8 + hillR() * 0.5, pcz = 0.8 + hillR() * 0.5;
     pineCanopyT.push({ p: [px, py + 2.9 * psc, pz], r: [0, hillR() * PI * 2, 0], s: [psc * 1.1 * pcx, psc * (0.5 + hillR() * 0.25), psc * 1.1 * pcz] });
   }
-  var clusterCount = MOBILE ? 90 : 290;
+  var clusterCount = MOBILE ? 100 : 300;
   for (var sc = 0; sc < clusterCount; sc++) {
-    var sa = hillR() * PI * 2, st = 0.38 + hillR() * 0.34;
+    var sa = hillR() * PI * 2, st = 0.38 + hillR() * 0.48;
     var sm = cliffRadiusMul(st, sa, 5);
     var sx = CX + cos(sa) * RX * sm, sz = CZ + sin(sa) * RZ * sm, sy = cliffY(st);
     var clumpN = 3 + ((hillR() * 4) | 0);
@@ -2689,10 +2720,10 @@ window.buildTerrain = function (THREE, mats, H) {
   // variants desaturated toward grey-green to read as aged/mossy) so roofs stop reading as one
   // identical geometry+colour repeated everywhere.
   var roofVariantDefs = [
-    { geo: hipGeo, color: [0.91, 0.38, 0.17] },   // hip, saturated warm terracotta (+hue)
+    { geo: hipGeo, color: [0.85, 0.42, 0.22] },   // hip, warm terracotta (toned down from neon-orange)
     { geo: hipGeo, color: [0.80, 0.50, 0.20] },   // hip, standard clay
     { geo: hipGeo, color: [0.70, 0.56, 0.34] },   // hip, sun-bleached pale (-hue/desaturated)
-    { geo: flatGeo, color: [0.74, 0.68, 0.56] },  // flat modern concrete cap, warm sand
+    { geo: flatGeo, color: [0.83, 0.80, 0.72] },  // flat modern concrete cap, pale/whitewashed
     { geo: flatGeo, color: [0.56, 0.58, 0.50] },  // flat cap, weathered grey-green (desaturated)
     { geo: damagedGeo, color: [0.52, 0.46, 0.30] } // damaged/mossy, desaturated + green-shifted
   ];
@@ -2702,8 +2733,13 @@ window.buildTerrain = function (THREE, mats, H) {
     return m;
   });
   var roofBuckets = [[], [], [], [], [], []];
-  // Cumulative probabilities: ~45% hip (pristine tile), ~35% flat (modern), ~20% damaged/mossy.
-  var roofCum = [0.15, 0.30, 0.45, 0.625, 0.80, 1.0];
+  // Cumulative probabilities: ~25% hip (pristine tile), ~55% flat (modern -- the commonest real
+  // Athens roof), ~20% damaged/mossy. Was ~45% hip, which (all three hip variants being some
+  // shade of saturated orange/terracotta, the one roof shape with a strong silhouette) made the
+  // whole city read as a uniform field of orange pyramids at a distance even though the flat/
+  // damaged variants were already there -- they just don't register as a distinct shape from far
+  // away the way a pointed hip roof does.
+  var roofCum = [0.10, 0.18, 0.25, 0.50, 0.80, 1.0];
   function roofVariantAt(hx, hz) {
     var n = (H.noise2(hx * 0.018, hz * 0.021, 601) * 0.5 + 0.5);
     for (var vi2 = 0; vi2 < roofCum.length; vi2++) if (n < roofCum[vi2]) return vi2;
@@ -2711,7 +2747,7 @@ window.buildTerrain = function (THREE, mats, H) {
   }
   // Tree clumps and small parks woven into the city fabric.
   var treeTrunkGeo = new THREE.CylinderGeometry(0.12, 0.18, 1.6, 5);
-  var treeCanopyGeo = new THREE.IcosahedronGeometry(0.85, 0);
+  var treeCanopyGeo = new THREE.IcosahedronGeometry(1.5, 0); // bigger crown -- pure scale, reads at distance
   var parkGeo = new THREE.BoxGeometry(1, 1, 1);
   var cityTreeTrunkT = [], cityTreeCanopyT = [], parkT = [];
 
@@ -2738,9 +2774,12 @@ window.buildTerrain = function (THREE, mats, H) {
   // gaps between blocks read as walked/paved paths rather than plain bare sand.
   var streetGeo = new THREE.BoxGeometry(1, 1, 1);
   var streetT = [];
+  // Widened from (160,85) so a real forested greenbelt (the hillside pine/scrub band above, whose
+  // range was extended to match) separates the rock from the streets, instead of houses starting
+  // almost the moment the talus ends.
   function ellipseE(hx, hz) {
     var dx = hx + 45, dz = hz;
-    return (dx / 160) * (dx / 160) + (dz / 85) * (dz / 85);
+    return (dx / 215) * (dx / 215) + (dz / 112) * (dz / 112);
   }
   // Occupancy fraction beyond the mid tier: a smooth 3-step fade (~100% -> ~55% intermediate ->
   // ~30% at the haze edge) instead of the old hard jump from a fully-filled far tier straight to
@@ -2790,8 +2829,13 @@ window.buildTerrain = function (THREE, mats, H) {
         }
         continue;
       }
+      // Tree-clump/park odds are higher near the hill and taper with distance, so the city fabric
+      // itself carries visibly more greenery close in (real Plaka courtyards + the archaeological
+      // park's edge) instead of a flat 3.5%/1.5% everywhere.
+      var treeChance = rr < 260 ? 0.09 : rr < 620 ? 0.05 : 0.02;
+      var parkChance = rr < 260 ? 0.045 : rr < 620 ? 0.02 : 0.01;
       var special = cityR();
-      if (special < 0.035) {
+      if (special < treeChance) {
         // Tree clump instead of a house
         var tsc = 0.8 + cityR() * 0.7;
         cityTreeTrunkT.push({ p: [hx, 0.8 * tsc - 80, hz], s: [tsc, tsc, tsc] });
@@ -2799,7 +2843,7 @@ window.buildTerrain = function (THREE, mats, H) {
           var loA = (lobe / 3) * PI * 2 + cityR();
           cityTreeCanopyT.push({ p: [hx + cos(loA) * 0.7 * tsc, (1.7 + cityR() * 0.5) * tsc - 80, hz + sin(loA) * 0.7 * tsc], s: [tsc * 0.8, tsc * 0.7, tsc * 0.8] });
         }
-      } else if (special < 0.05) {
+      } else if (special < treeChance + parkChance) {
         // Small park: a flat green patch with a couple of trees
         parkT.push({ p: [hx, -80 + 0.03, hz], r: [0, yaw, 0], s: [cell * 0.9, 0.06, cell * 0.9] });
         for (var pt2 = 0; pt2 < 2; pt2++) {
@@ -2809,6 +2853,10 @@ window.buildTerrain = function (THREE, mats, H) {
           cityTreeCanopyT.push({ p: [pox, 1.9 * ptsc - 80, poz], s: [ptsc * 0.8, ptsc * 0.7, ptsc * 0.8] });
         }
       } else if (rr < 260) {
+        // Coarse, spatially-coherent (noise, not per-cell coin-flip) open patches -- small plazas,
+        // vacant lots, wider courtyards -- so the near-tier grid isn't a literal 100%-filled carpet
+        // of houses between the streets.
+        if (H.noise2(hx * 0.02, hz * 0.022, 811) > 0.62) continue;
         // Near tier: full 1-6 story range with real variety -- ~40% single-storey cottages,
         // ~40% ordinary 2-3.5 storey houses, ~20% tall 4-6 storey buildings.
         var roll1 = cityR(), stories1;
@@ -2819,6 +2867,8 @@ window.buildTerrain = function (THREE, mats, H) {
         houseT.push({ p: [hx, -80 + syh / 2, hz], r: [0, yaw, 0], s: [sxh, syh, szh] });
         roofBuckets[roofVariantAt(hx, hz)].push({ p: [hx, -80 + syh + 0.3 * ((sxh + szh) / 2) * 0.35, hz], r: [0, yaw, 0], s: [(sxh + szh) / 2 * 1.05, (sxh + szh) / 2 * 0.9, (sxh + szh) / 2 * 1.05] });
       } else if (rr < 620) {
+        // Same coarse open-patch mask, sparser than the near tier so the mid tier still reads dense.
+        if (H.noise2(hx * 0.014, hz * 0.016, 812) > 0.72) continue;
         // Mid tier: kept to 1-2 storeys per the art pass, so height variety concentrates near the hill.
         var stories2 = 1 + cityR() * 1.1;
         var sx2 = 6 + cityR() * 11, sz2 = 6 + cityR() * 11, sy2 = stories2 * storyH;
@@ -2841,6 +2891,35 @@ window.buildTerrain = function (THREE, mats, H) {
     }
     rr += cell;
   }
+
+  // ---------------- Urban forest scatter: canopies rising between the rooftops ----------------
+  // A real city core this close to a major green space/archaeological park isn't wall-to-wall
+  // building -- courtyards, street trees and small squares thread all through it (see any real
+  // aerial of the Plaka/Makrygianni district). This scatter is independent of the grid above --
+  // positions can and do land on top of a house footprint, which is correct: a canopy poking up
+  // between buildings, not a gap in them. Cheap octahedron canopies (8 tris) bias toward the hill
+  // and taper out with distance, same gradient as the grid's own tree/park special tiles.
+  var forestR = lcg(419);
+  // Crown/trunk sized like a real 5-8m-wide tree (was a near-invisible 1-2m at this view distance
+  // -- pure scale, no extra geometry cost) so the scatter actually registers in wide shots instead
+  // of disappearing to sub-pixel specks between the rooftops.
+  var forestCanopyGeo = new THREE.OctahedronGeometry(2.3, 0);
+  var forestTrunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 2.4, 5);
+  var forestTrunkT = [], forestOliveT = [], forestCypressT = [];
+  var forestCount = MOBILE ? 150 : 430;
+  for (var fo = 0; fo < forestCount; fo++) {
+    var fa = forestR() * PI * 2;
+    // Weighted toward inner radii (denser near the hill, thinning outward), capped at the mid
+    // tier's own outer edge so this stays a "green city core" effect, not a forest at the haze.
+    var fr = 55 + Math.pow(forestR(), 0.65) * 560;
+    var fhx = -45 + cos(fa) * fr, fhz = sin(fa) * fr;
+    if (ellipseE(fhx, fhz) < 1) continue; // keep off the hill itself
+    var fsc = 0.85 + forestR() * 0.95;
+    forestTrunkT.push({ p: [fhx, -80 + 0.7 * fsc, fhz], s: [fsc, fsc, fsc] });
+    var fCanopy = { p: [fhx, -80 + 1.6 * fsc, fhz], r: [0, forestR() * PI * 2, 0], s: [fsc, fsc * (0.85 + forestR() * 0.3), fsc] };
+    if (forestR() < 0.6) forestOliveT.push(fCanopy); else forestCypressT.push(fCanopy);
+  }
+
   var cityGroup = new THREE.Group();
   cityGroup.add(H.instance(bodyGeo, mats.plaster, houseT));
   for (var rv = 0; rv < roofVariantDefs.length; rv++) {
@@ -2857,6 +2936,9 @@ window.buildTerrain = function (THREE, mats, H) {
     cityGroup.add(H.instance(streetGeo, streetMat, streetT));
   }
   if (cityTreeTrunkT.length) cityGroup.add(H.instance(treeTrunkGeo, mats.trunk, cityTreeTrunkT));
+  if (forestTrunkT.length) cityGroup.add(H.instance(forestTrunkGeo, mats.trunk, forestTrunkT));
+  if (forestOliveT.length) cityGroup.add(H.instance(forestCanopyGeo, mats.foliageOlive, forestOliveT));
+  if (forestCypressT.length) cityGroup.add(H.instance(forestCanopyGeo, mats.foliageCypress, forestCypressT));
   if (cityTreeCanopyT.length) cityGroup.add(H.instance(treeCanopyGeo, mats.foliageCypress, cityTreeCanopyT));
   group.add(cityGroup);
 
@@ -2955,6 +3037,11 @@ window.buildParthenon = function (THREE, mats, H) {
   var group = new THREE.Group();
   // Raise the building so its three steps stand above the plateau
   group.position.y = 1.65;
+  // Real Parthenon's 70m axis runs east-west with the entrance facing east;
+  // the geometry below is authored long-axis-along-z with the entrance
+  // (pronaos/front pediment) on local +z, so rotate 90 deg about y to send
+  // local +z to world +x (east).
+  group.rotation.y = Math.PI / 2;
 
   // Crepidoma: three steps, with the top (stylobate) step curving gently
   // upward toward mid-length (H.makeSteppedBase applies this automatically
@@ -3804,8 +3891,11 @@ window.buildSouthSlope = function (THREE, mats, H) {
     return g;
   }
   // Rock apron
-  // Lower amplitude than the helper's default reads as a real hillside apron rather than dunes.
-  var apron = H.makeRockOutcrop(260, 120, 4.5, 3);
+  // Lower amplitude than the helper's default reads as a real hillside apron rather than dunes;
+  // nudged up from 4.5 (art-pass note: the carved bowls read as too flat/artificial around the
+  // theatres) while staying well short of dune territory -- the bowl carving below clips it back
+  // down around the seating anyway, so this only adds relief to the untouched slope in between.
+  var apron = H.makeRockOutcrop(260, 120, 6, 3);
   apron.position.set(-60, -45, 85);
   apron.rotation.x = 0.31;
   group.add(apron);
@@ -4063,23 +4153,43 @@ window.buildSouthSlope = function (THREE, mats, H) {
   var ray = new THREE.Raycaster();
   var down = new THREE.Vector3(0, -1, 0);
   var canopyT = [], trunkT = [];
-  // Denser cypress cover on the hillside apron between the two theatres (was a sparse 16) --
-  // matches the wider hillside-vegetation density pass in 03-terrain.js.
-  for (var tries = 0; tries < 700 && canopyT.length < 46; tries++) {
+  // Denser cypress cover on the hillside apron between the two theatres (raised again per the art
+  // pass: the south-slope surroundings still read sparse/artificial next to the theatres) -- and
+  // sized/placed with more spread so the crowns don't read as one uniform height across the slope.
+  var cypressTarget = MOBILE ? 32 : 62;
+  for (var tries = 0; tries < 1300 && canopyT.length < cypressTarget; tries++) {
     var cx3 = -175 + rnd() * 215, cz3 = 70 + rnd() * 70;
     if (floorAt(cx3, cz3) < Infinity) continue;
     ray.set(new THREE.Vector3(cx3, 50, cz3), down);
     var hit = ray.intersectObject(apron);
     if (!hit.length || hit[0].point.y < -75) continue;
-    var gy = hit[0].point.y, sc = 0.8 + rnd() * 0.5;
+    var gy = hit[0].point.y, sc = 0.65 + rnd() * 0.85; // wider height range: young saplings to tall old cypresses
     // Asymmetric xz scale (0.8-1.3x independently per axis) so each cone canopy reads as a
     // slightly irregular, wind-shaped crown instead of a perfect cone of revolution.
     var ccx = 0.8 + rnd() * 0.5, ccz = 0.8 + rnd() * 0.5;
     canopyT.push({ p: [cx3, gy + 1.2 + 4.5 * sc, cz3], s: [sc * ccx, sc, sc * ccz] });
-    trunkT.push({ p: [cx3, gy + 0.75, cz3] });
+    trunkT.push({ p: [cx3, gy + 0.75, cz3], s: [sc, sc, sc] });
   }
   group.add(H.instance(new THREE.ConeGeometry(1.3, 9, 8), mats.foliageCypress, canopyT));
   group.add(H.instance(new THREE.CylinderGeometry(0.2, 0.25, 1.5, 6), mats.trunk, trunkT));
+
+  // A scatter of broadleaf olive trees mixed in among the cypresses so the hillside reads as a
+  // real mixed Mediterranean slope, not a uniform conifer plantation -- same drop-onto-apron
+  // technique, single-lobe canopy since these sit well back from camera in every south-slope view.
+  var oliveCanopyT2 = [], oliveTrunkT2 = [];
+  var oliveTarget2 = MOBILE ? 8 : 22;
+  for (var otries = 0; otries < 500 && oliveCanopyT2.length < oliveTarget2; otries++) {
+    var ocx = -175 + rnd() * 215, ocz = 70 + rnd() * 70;
+    if (floorAt(ocx, ocz) < Infinity) continue;
+    ray.set(new THREE.Vector3(ocx, 50, ocz), down);
+    var ohit = ray.intersectObject(apron);
+    if (!ohit.length || ohit[0].point.y < -75) continue;
+    var ogy = ohit[0].point.y, osc = 0.7 + rnd() * 0.6;
+    oliveTrunkT2.push({ p: [ocx, ogy + 0.9 * osc, ocz], s: [osc, osc, osc] });
+    oliveCanopyT2.push({ p: [ocx, ogy + 1.6 * osc, ocz], r: [0, rnd() * PI * 2, 0], s: [osc * 1.3, osc, osc * 1.3] });
+  }
+  group.add(H.instance(new THREE.CylinderGeometry(0.14, 0.22, 1.6, 6), mats.trunk, oliveTrunkT2));
+  group.add(H.instance(new THREE.IcosahedronGeometry(1.3, 0), mats.foliageOlive, oliveCanopyT2));
 
   return group;
 };
@@ -4138,7 +4248,7 @@ window.buildScenery = function (THREE, mats, H) {
   var maxAttempts = 2000;
   var attempts = 0;
 
-  var oliveTarget = MOBILE ? 34 : 46;
+  var oliveTarget = MOBILE ? 38 : 52;
   while (oliveCount < oliveTarget && attempts < maxAttempts) {
     attempts++;
     var angle = rnd() * Math.PI * 2;
@@ -5230,7 +5340,10 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // segments (a handful of extra triangles per head) so the carved sockets and
     // mouth groove below have enough vertex density to actually show up.
     var lowRes = !!opts.lowRes || MOBILE;
-    var seg = lowRes ? 12 : 15;
+    // opts.seg: explicit override for hero figures (the Erechtheion caryatids)
+    // that deserve finer facial carving than the pediment-figure default; every
+    // existing caller leaves this unset and keeps the lowRes/15 behaviour below.
+    var seg = opts.seg || (lowRes ? 12 : 15);
     var geo = new THREE.SphereGeometry(size, seg, Math.max(6, seg - 4));
     var pos = geo.getAttribute('position');
     var arr = pos.array;
@@ -5842,16 +5955,65 @@ window.addFigureHelpers = function (THREE, mats, H) {
           bust += 0.052 * height * bustFall * nearBustTheta;
         }
 
-        return kneeBulge + seamPull + bust;
+        // Director's r2 render check (v-cary): the raw fold field at the
+        // shoulder can crest at roughly 2x the base radius (vFold * bias *
+        // ampMod stack up multiplicatively), which swallowed the arm stubs
+        // below no matter how far outside rShoulder they were anchored.
+        // Carve a shallow flattened channel into the fold field at both
+        // shoulders (theta 0 and PI, where the arms attach) so they sit
+        // against a comparatively low-relief patch instead of fighting an
+        // unpredictable fold crest.
+        var shoulderFrac = shoulderY / neckBaseY;
+        var nearShoulderY = gaussFall(yFrac - shoulderFrac, 0.14);
+        var armChannel = 0;
+        for (var aSide = -1; aSide <= 1; aSide += 2) {
+          var armTheta = aSide > 0 ? 0 : PI;
+          var nearArmTheta = gaussFall(((theta - armTheta + PI) % (2 * PI)) - PI, 0.55);
+          armChannel -= 0.24 * nearShoulderY * nearArmTheta;
+        }
+
+        return kneeBulge + seamPull + bust + armChannel;
       }
     });
     group.add(body);
 
-    // stub arms at the sides (forearms broken off, as on the surviving Caryatids)
-    var armR = 0.052 * height;
+    // Arms: one side hangs straight at the hip (broken off below the elbow, as
+    // on most surviving originals), the other bends at the elbow and crosses
+    // in front to gather the peplos — the one pose element every photographed
+    // Caryatid shares, and the reason the previous pair of near-identical,
+    // barely-offset stubs never read as arms at all (they sat almost flush
+    // against the torso silhouette). The bent arm alternates with supportSide
+    // so the row doesn't repeat the same silhouette six times.
+    // rShoulder/rHip below are absolute metres (this profile's own radius
+    // scale, not a height-relative fraction), so every arm offset here is
+    // kept in that same absolute scale. The armChannel carved into the body's
+    // bulge() above (see the profile's foldedLathe call) flattens the fold
+    // field at theta 0/PI near shoulder height, so these modest offsets clear
+    // the drapery instead of being swallowed by an unpredictable fold crest.
+    var armR = 0.072 * height;
     var stubShY = shoulderY - 0.02 * height;
-    group.add(taperedLimb(new THREE.Vector3(-rShoulder * 0.85, stubShY, 0), new THREE.Vector3(-rShoulder * 1.05, stubShY - 0.14 * height, 0.02 * height), armR, armR * 0.8, MOBILE ? 6 : 8, mat));
-    group.add(taperedLimb(new THREE.Vector3(rShoulder * 0.85, stubShY, 0), new THREE.Vector3(rShoulder * 1.05, stubShY - 0.14 * height, 0.02 * height), armR, armR * 0.8, MOBILE ? 6 : 8, mat));
+    var bentSide = -supportSide, straightSide = supportSide;
+
+    // straight arm: shoulder to a stub past the elbow (forearm broken off, as
+    // on most surviving originals), anchored outside the (now-flattened)
+    // shoulder radius so it casts its own separating shadow line instead of
+    // blending into the body.
+    group.add(taperedLimb(
+      new THREE.Vector3(straightSide * (rShoulder + 0.10), stubShY, -0.05 * height),
+      new THREE.Vector3(straightSide * (rShoulder + 0.16), stubShY - 0.30 * height, 0.02 * height),
+      armR, armR * 0.66, MOBILE ? 7 : 10, mat));
+
+    // bent arm: upper arm shoulder->elbow, forearm elbow->hand reaching to the
+    // front (-z) of the skirt to gather the peplos — the one pose element
+    // every photographed Caryatid shares. The free-leg side (where this arm
+    // and hand sit) also carries the lighter fold bias (vFoldBiasTheta favours
+    // the weight-bearing side), so the raw fold crest there is well below the
+    // shoulder-side worst case.
+    var elbow = new THREE.Vector3(bentSide * (rShoulder + 0.14), shoulderY - 0.20 * height, -0.16);
+    var hand = new THREE.Vector3(bentSide * rHip * 0.55, shoulderY - 0.34 * height, -0.42);
+    group.add(taperedLimb(new THREE.Vector3(bentSide * (rShoulder + 0.09), stubShY, 0), elbow, armR, armR * 0.85, MOBILE ? 7 : 10, mat));
+    group.add(taperedLimb(elbow, hand, armR * 0.82, armR * 0.55, MOBILE ? 6 : 9, mat));
+    group.add(ballMesh(armR * 0.62, MOBILE ? 6 : 8, mat, hand));
 
     var neck = taperedLimb(new THREE.Vector3(0, neckBaseY, 0), new THREE.Vector3(0, neckBaseY + 0.035 * height, 0), rNeck, rNeck * 0.95, MOBILE ? 8 : 10, mat);
     group.add(neck);
@@ -5861,11 +6023,22 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // sculpts hair volume/hairline straight into the head sphere itself (no
     // extra geometry, so nothing can clip), pushed harder than the default for
     // a heavier coiffure to match the heavy braids down the back.
-    var headGroup = makeHead(headSize, { material: mat, hair: false, hairBack: 2.2 });
+    // seg: bumped from makeHead's default 15 to 20 for these hero figures —
+    // they're seen close (v-cary) unlike the pediment/relief figures the
+    // default is tuned for, so the extra facial resolution is worth the small
+    // per-head triangle cost across only 6 statues.
+    var headGroup = makeHead(headSize, { material: mat, hair: false, hairBack: 2.2, seg: MOBILE ? 12 : 20 });
     var headY = neckBaseY + 0.035 * height + headSize * 0.9;
     headGroup.position.y = headY;
-    // a small per-figure head turn so the row doesn't read as identical pegs
-    headGroup.rotation.y = supportSide * 0.10 + (rnd() - 0.5) * 0.14;
+    // Bug fix: makeHead sculpts the face (brow/eyes/nose/chin) onto its own
+    // +z hemisphere, but this module's body (bust bulge, fold bias, braids)
+    // is built front = -z as documented above. Without a 180 degree turn the
+    // carved face ended up on the same side as the braids — i.e. facing into
+    // the building, away from every approach — which is why the heads read as
+    // blank domes in the v-cary render despite the sculpted features existing
+    // in the geometry. The PI turn brings the face around to the body's -z
+    // front; the existing small per-figure turn still varies the row.
+    headGroup.rotation.y = PI + supportSide * 0.10 + (rnd() - 0.5) * 0.14;
     group.add(headGroup);
 
     // long, thick braids down the back (front faces -z, so the back is +z).

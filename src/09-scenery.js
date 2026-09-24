@@ -50,7 +50,7 @@ window.buildScenery = function (THREE, mats, H) {
   var maxAttempts = 2000;
   var attempts = 0;
 
-  var oliveTarget = MOBILE ? 34 : 46;
+  var oliveTarget = MOBILE ? 38 : 52;
   while (oliveCount < oliveTarget && attempts < maxAttempts) {
     attempts++;
     var angle = rnd() * Math.PI * 2;

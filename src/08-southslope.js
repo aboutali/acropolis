@@ -88,8 +88,11 @@ window.buildSouthSlope = function (THREE, mats, H) {
     return g;
   }
   // Rock apron
-  // Lower amplitude than the helper's default reads as a real hillside apron rather than dunes.
-  var apron = H.makeRockOutcrop(260, 120, 4.5, 3);
+  // Lower amplitude than the helper's default reads as a real hillside apron rather than dunes;
+  // nudged up from 4.5 (art-pass note: the carved bowls read as too flat/artificial around the
+  // theatres) while staying well short of dune territory -- the bowl carving below clips it back
+  // down around the seating anyway, so this only adds relief to the untouched slope in between.
+  var apron = H.makeRockOutcrop(260, 120, 6, 3);
   apron.position.set(-60, -45, 85);
   apron.rotation.x = 0.31;
   group.add(apron);
@@ -347,23 +350,43 @@ window.buildSouthSlope = function (THREE, mats, H) {
   var ray = new THREE.Raycaster();
   var down = new THREE.Vector3(0, -1, 0);
   var canopyT = [], trunkT = [];
-  // Denser cypress cover on the hillside apron between the two theatres (was a sparse 16) --
-  // matches the wider hillside-vegetation density pass in 03-terrain.js.
-  for (var tries = 0; tries < 700 && canopyT.length < 46; tries++) {
+  // Denser cypress cover on the hillside apron between the two theatres (raised again per the art
+  // pass: the south-slope surroundings still read sparse/artificial next to the theatres) -- and
+  // sized/placed with more spread so the crowns don't read as one uniform height across the slope.
+  var cypressTarget = MOBILE ? 32 : 62;
+  for (var tries = 0; tries < 1300 && canopyT.length < cypressTarget; tries++) {
     var cx3 = -175 + rnd() * 215, cz3 = 70 + rnd() * 70;
     if (floorAt(cx3, cz3) < Infinity) continue;
     ray.set(new THREE.Vector3(cx3, 50, cz3), down);
     var hit = ray.intersectObject(apron);
     if (!hit.length || hit[0].point.y < -75) continue;
-    var gy = hit[0].point.y, sc = 0.8 + rnd() * 0.5;
+    var gy = hit[0].point.y, sc = 0.65 + rnd() * 0.85; // wider height range: young saplings to tall old cypresses
     // Asymmetric xz scale (0.8-1.3x independently per axis) so each cone canopy reads as a
     // slightly irregular, wind-shaped crown instead of a perfect cone of revolution.
     var ccx = 0.8 + rnd() * 0.5, ccz = 0.8 + rnd() * 0.5;
     canopyT.push({ p: [cx3, gy + 1.2 + 4.5 * sc, cz3], s: [sc * ccx, sc, sc * ccz] });
-    trunkT.push({ p: [cx3, gy + 0.75, cz3] });
+    trunkT.push({ p: [cx3, gy + 0.75, cz3], s: [sc, sc, sc] });
   }
   group.add(H.instance(new THREE.ConeGeometry(1.3, 9, 8), mats.foliageCypress, canopyT));
   group.add(H.instance(new THREE.CylinderGeometry(0.2, 0.25, 1.5, 6), mats.trunk, trunkT));
+
+  // A scatter of broadleaf olive trees mixed in among the cypresses so the hillside reads as a
+  // real mixed Mediterranean slope, not a uniform conifer plantation -- same drop-onto-apron
+  // technique, single-lobe canopy since these sit well back from camera in every south-slope view.
+  var oliveCanopyT2 = [], oliveTrunkT2 = [];
+  var oliveTarget2 = MOBILE ? 8 : 22;
+  for (var otries = 0; otries < 500 && oliveCanopyT2.length < oliveTarget2; otries++) {
+    var ocx = -175 + rnd() * 215, ocz = 70 + rnd() * 70;
+    if (floorAt(ocx, ocz) < Infinity) continue;
+    ray.set(new THREE.Vector3(ocx, 50, ocz), down);
+    var ohit = ray.intersectObject(apron);
+    if (!ohit.length || ohit[0].point.y < -75) continue;
+    var ogy = ohit[0].point.y, osc = 0.7 + rnd() * 0.6;
+    oliveTrunkT2.push({ p: [ocx, ogy + 0.9 * osc, ocz], s: [osc, osc, osc] });
+    oliveCanopyT2.push({ p: [ocx, ogy + 1.6 * osc, ocz], r: [0, rnd() * PI * 2, 0], s: [osc * 1.3, osc, osc * 1.3] });
+  }
+  group.add(H.instance(new THREE.CylinderGeometry(0.14, 0.22, 1.6, 6), mats.trunk, oliveTrunkT2));
+  group.add(H.instance(new THREE.IcosahedronGeometry(1.3, 0), mats.foliageOlive, oliveCanopyT2));
 
   return group;
 };
