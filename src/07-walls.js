@@ -93,21 +93,26 @@ window.buildWalls = function (THREE, mats, H) {
   }
 
   // ---- Battered ashlar/rubble masonry: courses of instanced blocks, wall battered inward with height ----
+  // Small seeded LCG (deterministic, no engine RNG): drives per-block length/height/offset jitter.
+  function wallRand(seed) {
+    var s2 = seed >>> 0;
+    return function () { s2 = (s2 * 1664525 + 1013904223) >>> 0; return s2 / 4294967296; };
+  }
   var courseGeo = new THREE.BoxGeometry(1, 1, 1);
   var wallT = [], capT = [], parapetT = [];
-  var courseH = 1.05;
+  var courseH = 1.1;
   for (var sr = 0; sr < allSubRuns.length; sr++) {
     var run = allSubRuns[sr].points, wallH = allSubRuns[sr].h;
     var courses = Math.round(wallH / courseH);
     var baseThick = 3.4;
-    // total polyline length -> place blocks at even spacing per course, offset every other course (running bond)
+    // total polyline length -> place blocks of varied length per course, with a randomized start
+    // offset each course so the head joints stagger irregularly (no repeating running-bond pattern).
     for (var c = 0; c < courses; c++) {
       var frac = c / courses;
-      var batter = baseThick * (1 - 0.22 * frac); // wall thins slightly as it rises
+      var batter = baseThick * (1 - 0.26 * frac); // wall thins (battered face) as it rises
       var cy = c * courseH + courseH / 2;
-      var blockLen = 3.6 + 0.7 * ((c % 2)); // coarsened further: frees triangle budget for the land pass's density work
-      var offset = (c % 2) * blockLen * 0.5;
-      var dist = -offset;
+      var rng = wallRand(3000 + sr * 977 + c * 131);
+      var dist = -(rng() * 2.3);
       for (var seg = 0; seg < run.length - 1; seg++) {
         var p0 = run[seg], p1 = run[seg + 1];
         var dx = p1[0] - p0[0], dz = p1[1] - p0[1];
@@ -115,11 +120,20 @@ window.buildWalls = function (THREE, mats, H) {
         var ang = Math.atan2(dz, dx);
         var d0 = dist;
         while (d0 < segLen) {
+          // Each block's own length, drawn fresh so courses read as irregular coursed rubble
+          // (varied 0.8-2.5m blocks) instead of one long uniform "plank".
+          var blockLen = 0.8 + rng() * 1.7;
           if (d0 >= 0) {
             var t = d0 / segLen;
             var bx = p0[0] + t * dx, bz = p0[1] + t * dz;
-            var thisLen = Math.min(blockLen, segLen - d0) * (0.9 + 0.1 * H.noise2(bx, cy, 1));
-            wallT.push({ p: [bx + Math.cos(ang) * thisLen / 2, cy, bz + Math.sin(ang) * thisLen / 2], r: [0, -ang, 0], s: [thisLen * 0.96, courseH * 0.94, batter] });
+            var thisLen = Math.min(blockLen, segLen - d0);
+            var hJit = 0.78 + rng() * 0.36; // per-block height variation
+            var faceJit = (rng() - 0.5) * 0.12 * batter; // tiny in/out jitter: no two faces perfectly flush
+            var cyJit = cy + (rng() - 0.5) * courseH * 0.1;
+            wallT.push({
+              p: [bx + Math.cos(ang) * thisLen / 2 - Math.sin(ang) * faceJit, cyJit, bz + Math.sin(ang) * thisLen / 2 + Math.cos(ang) * faceJit],
+              r: [0, -ang, 0], s: [thisLen * 0.92, courseH * hJit, batter]
+            });
           }
           d0 += blockLen;
         }

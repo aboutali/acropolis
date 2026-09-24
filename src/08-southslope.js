@@ -287,19 +287,33 @@ window.buildSouthSlope = function (THREE, mats, H) {
     }
     return f;
   }
+  // Outer-edge blend: the apron is a flat 260x120 rock-outcrop patch (see H.makeRockOutcrop call
+  // above), so without this its south/city-facing and lateral edges just stop -- a thick, dead-flat
+  // slab boundary hanging above the plain. Pull those true mesh edges down to the plain (y=-80) over
+  // the last stretch of each axis so the hillside visibly runs out to meet the city ground instead of
+  // ending in a hard line. The hill-facing edge (negative local z, tucked under the plateau's own
+  // cliff mesh) is left alone.
+  var apronHalfX = 130, apronHalfZ = 60; // half-extents of the 260 x 120 outcrop plane
+  function apronEdgeFactor(xl, zl) {
+    var zf = zl > 0 ? clamp01((zl / apronHalfZ - 0.8) / 0.2) : 0;
+    var xf = clamp01((Math.abs(xl) / apronHalfX - 0.86) / 0.14);
+    var t = Math.max(zf, xf);
+    return t * t * (3 - 2 * t);
+  }
   apron.updateMatrix();
   var toWorld = apron.matrix.clone();
   var toLocal = new THREE.Matrix4().copy(toWorld).invert();
   var apPos = apron.geometry.getAttribute('position');
   var v = new THREE.Vector3();
   for (var k = 0; k < apPos.count; k++) {
+    var xl0 = apPos.getX(k), zl0 = apPos.getZ(k);
     v.fromBufferAttribute(apPos, k).applyMatrix4(toWorld);
     var fl = floorAt(v.x, v.z);
-    if (v.y > fl) {
-      v.y = fl;
-      v.applyMatrix4(toLocal);
-      apPos.setXYZ(k, v.x, v.y, v.z);
-    }
+    if (v.y > fl) v.y = fl;
+    var et = apronEdgeFactor(xl0, zl0);
+    if (et > 0) v.y = v.y * (1 - et) + (-80) * et;
+    v.applyMatrix4(toLocal);
+    apPos.setXYZ(k, v.x, v.y, v.z);
   }
   apPos.needsUpdate = true;
   apron.geometry.computeVertexNormals();
