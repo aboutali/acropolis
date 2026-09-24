@@ -19,9 +19,10 @@ const FIG_NAMES = ['makeFigure', 'makeCaryatid', 'makeStatue', 'makeRelief', 'ma
 const EXPORTS = {
   '00': 'CFG', '01': 'buildMats', '02': 'makeHelpers', '03': 'buildTerrain', '04': 'buildParthenon',
   '05': 'buildErechtheion', '06': 'buildPropylaea', '07': 'buildWalls', '08': 'buildSouthSlope',
-  '09': 'buildScenery', '10': 'buildEnv', '11': 'makeOrbit', '12': 'startAcropolis', '13': 'addFigureHelpers',
+  '09': 'buildScenery', '10': 'buildEnv', '11': 'makeOrbit', '12': 'startAcropolis', '13': 'addFigureHelpers', '14': 'loadAssets',
 };
-const FORBIDDEN = /BufferGeometryUtils|OrbitControls|mergeBufferGeometries|THREE\.Geometry\b|TextureLoader|GLTFLoader|\bfetch\s*\(|https?:\/\/|\brequire\s*\(|^\s*import\s|^\s*export\s|Math\.random|```/m;
+// Assets load from relative assets/ paths; add-on scripts come from assemble.mjs, so modules still carry no URLs
+const FORBIDDEN = /OrbitControls|THREE\.Geometry\b|https?:\/\/|\brequire\s*\(|^\s*import\s|^\s*export\s|Math\.random|```/m;
 
 const files = process.argv.slice(2).length
   ? process.argv.slice(2).map(f => path.resolve(ROOT, f))
@@ -124,6 +125,8 @@ function checkFile(file) {
       win.makeOrbit = () => ({ update() {}, setAutoRotate() {} });
       win.innerWidth = 1440; win.innerHeight = 900; win.addEventListener = () => 0;
       result();
+    } else if (n === 14) {
+      if (typeof result !== 'function') problems.push('window.loadAssets must be a function');
     } else if (n === 13) {
       const mats = Object.fromEntries(MAT_NAMES.map(k => [k, stubObj(nanLog)]));
       const H = Object.fromEntries(H_NAMES.map(k => [k, k === 'noise2' ? () => 0.3 : () => stubObj(nanLog)]));

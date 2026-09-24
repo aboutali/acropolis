@@ -5,10 +5,12 @@ window.startAcropolis = function () {
 
   var renderer = new THREE.WebGLRenderer({ antialias: !CFG.MOBILE, powerPreference: 'high-performance' });
   renderer.setSize(W, Hh);
+  // The debug readout counts every pass of a frame, so reset per frame by hand
+  renderer.info.autoReset = false;
   document.getElementById('app').appendChild(renderer.domElement);
 
   var scene = new THREE.Scene();
-  var camera = new THREE.PerspectiveCamera(48, W / Hh, 0.5, 9000);
+  var camera = new THREE.PerspectiveCamera(48, W / Hh, 1.0, 9000);
   camera.position.set(170, 95, 205);
 
   var mats = window.buildMats(THREE);
@@ -24,6 +26,31 @@ window.startAcropolis = function () {
 
   var env = window.buildEnv(THREE, scene, renderer);
   if (mats.finishScene) mats.finishScene(scene, renderer);
+  // Photo textures and scanned statues replace procedural ones as they arrive
+  if (window.loadAssets) {
+    try { window.loadAssets(THREE, scene, mats, renderer, H); } catch (e) { console.error('assets failed', e); }
+  }
+
+  // Post-processing on desktop: ambient occlusion, soft bloom, gamma, FXAA. Phones render directly.
+  var composer = null, ssao = null, fxaa = null;
+  if (!CFG.MOBILE && THREE.EffectComposer && THREE.SSAOPass && location.search.indexOf('nofx') < 0) {
+    try {
+      composer = new THREE.EffectComposer(renderer);
+      ssao = new THREE.SSAOPass(scene, camera, W, Hh);
+      ssao.kernelRadius = 6;
+      ssao.minDistance = 0.0004;
+      ssao.maxDistance = 0.02;
+      composer.addPass(ssao);
+      composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(W, Hh), 0.18, 0.5, 0.92));
+      composer.addPass(new THREE.ShaderPass(THREE.GammaCorrectionShader));
+      fxaa = new THREE.ShaderPass(THREE.FXAAShader);
+      fxaa.material.uniforms.resolution.value.set(1 / (W * renderer.getPixelRatio()), 1 / (Hh * renderer.getPixelRatio()));
+      composer.addPass(fxaa);
+    } catch (e) {
+      console.error('post-processing disabled', e);
+      composer = null;
+    }
+  }
   var ctrl = window.makeOrbit(THREE, camera, renderer.domElement, { target: new THREE.Vector3(-30, 8, 0) });
 
   // Camera presets: ?view=<name> on load, legend buttons at runtime
@@ -57,6 +84,10 @@ window.startAcropolis = function () {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+    if (composer) {
+      composer.setSize(w, h);
+      if (fxaa) fxaa.material.uniforms.resolution.value.set(1 / (w * renderer.getPixelRatio()), 1 / (h * renderer.getPixelRatio()));
+    }
   }
 
   var resizeTimer;
@@ -86,7 +117,8 @@ window.startAcropolis = function () {
     var dt = Math.min(0.05, clock.getDelta());
     ctrl.update(dt);
     env.update(dt);
-    renderer.render(scene, camera);
+    renderer.info.reset();
+    if (composer) composer.render(dt); else renderer.render(scene, camera);
     frames++;
   }
   frame();

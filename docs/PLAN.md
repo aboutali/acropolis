@@ -175,3 +175,11 @@ An existing terminal session cannot be pushed to the cloud. After the final push
 - Sonnet screenshot review returns `ok: true` (or its remaining issues are listed in the final message).
 - Phone-width screenshot shows the scene and controls usable.
 - GitHub Pages URL and artifact URL both load.
+
+
+## Rule change (realism phase 2)
+The project may now use:
+- the official three.js r128 example add-ons from cdn.jsdelivr.net/npm/three@0.128.0/examples/js/ (listed in tools/assemble.mjs), for post-processing and glTF loading;
+- asset files under assets/: CC0 or attribution-licensed photo textures (assets/tex/) and scanned or modelled meshes as GLB (assets/models/), with credits in assets/CREDITS.md.
+The procedural scene stays the fallback: it renders at once, and assets replace procedural parts as they load (01-mats.js swaps texture maps, 14-assets.js swaps models). Module code still contains no absolute URLs.
+Blender (bpy 4.2, headless) is the offline asset pipeline: decimate scans, bake normal and AO maps, export GLB. Scripts live in tools/blender/.

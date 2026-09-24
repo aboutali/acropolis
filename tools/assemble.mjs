@@ -6,6 +6,12 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace
 const SRC = path.join(ROOT, 'src');
 const files = fs.readdirSync(SRC).filter(f => /^\d\d-.*\.js$/.test(f)).sort();
 const THREE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+// Official r128 example add-ons (post-processing and glTF loading), same version as the core build
+const ADDON_BASE = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/';
+const ADDONS = ['shaders/CopyShader.js', 'shaders/SSAOShader.js', 'shaders/LuminosityHighPassShader.js', 'shaders/GammaCorrectionShader.js',
+  'shaders/FXAAShader.js', 'math/SimplexNoise.js', 'postprocessing/EffectComposer.js', 'postprocessing/MaskPass.js',
+  'postprocessing/RenderPass.js', 'postprocessing/ShaderPass.js', 'postprocessing/SSAOPass.js', 'postprocessing/UnrealBloomPass.js',
+  'loaders/GLTFLoader.js'];
 
 const scripts = files.map(f => {
   const code = fs.readFileSync(path.join(SRC, f), 'utf8').replace(/<\/script/gi, '<\\/script');
@@ -57,6 +63,7 @@ const html = `<title>Acropolis of Athens</title>
 <button id="autorot" aria-pressed="true" title="Toggle auto-rotate">⟳</button>
 <div id="debug" hidden></div>
 <script src="${THREE_URL}"></script>
+${ADDONS.map(a => `<script src="${ADDON_BASE}${a}"></script>`).join('\n')}
 ${scripts}
 <script>
   (function () {
