@@ -350,8 +350,8 @@ window.buildTerrain = function (THREE, mats, H) {
   // distance the textured material reads the shape, not the facet count.
   var hillR = lcg(140);
   var trunkGeo = new THREE.CylinderGeometry(0.14, 0.22, 2.6, 5);
-  var pineGeo = new THREE.OctahedronGeometry(1.7, 0);
-  var scrubGeo = new THREE.OctahedronGeometry(0.6, 0);
+  var pineGeo = new THREE.IcosahedronGeometry(1.7, 0);
+  var scrubGeo = new THREE.IcosahedronGeometry(0.6, 0);
   var pineTrunkT = [], pineCanopyT = [], scrubT = [];
   // t is capped well short of 1 (unlike the boulder/rubble talus spray below, which fades out
   // anyway): at the higher counts here, even the previous build's occasional stragglers that
@@ -682,7 +682,8 @@ window.buildTerrain = function (THREE, mats, H) {
   // Crown/trunk sized like a real 5-8m-wide tree (was a near-invisible 1-2m at this view distance
   // -- pure scale, no extra geometry cost) so the scatter actually registers in wide shots instead
   // of disappearing to sub-pixel specks between the rooftops.
-  var forestCanopyGeo = new THREE.OctahedronGeometry(2.3, 0);
+  // Rounded canopies: octahedrons read as green crystals from a distance
+  var forestCanopyGeo = new THREE.IcosahedronGeometry(2.3, 0);
   var forestTrunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 2.4, 5);
   var forestTrunkT = [], forestOliveT = [], forestCypressT = [];
   var forestCount = MOBILE ? 150 : 430;
