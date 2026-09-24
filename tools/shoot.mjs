@@ -22,6 +22,17 @@ fs.mkdirSync(OUT, { recursive: true });
 // Serve three.js from a local cache so the page works behind proxies and offline
 const THREE_CACHE = path.join(OUT, 'three.min.js');
 if (!fs.existsSync(THREE_CACHE)) execSync(`curl -sSfL -o "${THREE_CACHE}" https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js`);
+// Serve the repo over HTTP: WebGL textures and glTF fetches are blocked from file:// pages
+import http from 'node:http';
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.jpg': 'image/jpeg', '.png': 'image/png', '.glb': 'model/gltf-binary', '.json': 'application/json', '.bin': 'application/octet-stream' };
+const server = http.createServer((req, res) => {
+  const p = path.join(ROOT, decodeURIComponent(req.url.split('?')[0]));
+  if (!p.startsWith(ROOT) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); return res.end(); }
+  res.writeHead(200, { 'Content-Type': MIME[path.extname(p)] || 'application/octet-stream' });
+  fs.createReadStream(p).pipe(res);
+});
+await new Promise(r => server.listen(0, '127.0.0.1', r));
+const BASE_URL = `http://127.0.0.1:${server.address().port}`;
 const browser = await pw.chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 for (const [label, vp] of [['desk', { width: 1280, height: 800 }], ['phone', { width: 390, height: 780 }]]) {
   const page = await browser.newPage({ viewport: vp });
@@ -37,7 +48,7 @@ for (const [label, vp] of [['desk', { width: 1280, height: 800 }], ['phone', { w
   page.on('console', m => { if (m.type() === 'error') console.log(`[${label}] console: ${m.text()}`); });
   page.on('pageerror', e => console.log(`[${label}] pageerror: ${e.message}`));
   for (const v of views) {
-    await page.goto(`file://${ROOT}/index.html?view=${custom ? 'overview' : v}&still&debug${process.env.Q || ''}`, { timeout: 180000 });
+    await page.goto(`${BASE_URL}/index.html?view=${custom ? 'overview' : v}&still&debug${process.env.Q || ''}`, { timeout: 180000 });
     if (custom) {
       await page.waitForTimeout(2500);
       await page.evaluate(c => { window.acropolisCtrl.setAutoRotate(false); window.acropolisCtrl.jumpTo(c); }, custom);
@@ -51,3 +62,4 @@ for (const [label, vp] of [['desk', { width: 1280, height: 800 }], ['phone', { w
   if (views.length && process.env.DESK_ONLY) break;
 }
 await browser.close();
+server.close();
