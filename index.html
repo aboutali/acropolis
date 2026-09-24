@@ -246,7 +246,7 @@ window.buildMats = function (THREE) {
   if (!HAS_DOC) {
     function flat(hex, rough, metal) { return new THREE.MeshStandardMaterial({ color: hex, roughness: rough, metalness: metal || 0 }); }
     mats.marble = flat(0xe9decc, 0.72); mats.marbleWorn = flat(0xd6c9ac, 0.85); mats.marbleShadowed = flat(0xc4b89c, 0.88);
-    mats.rock = flat(0xa2957a, 0.95); mats.rockDark = flat(0x7d735f, 0.97); mats.ground = flat(0xb2a896, 0.98);
+    mats.rock = flat(0xb2aa99, 0.95); mats.rockDark = flat(0x767065, 0.97); mats.ground = flat(0xaca595, 0.98);
     mats.city = flat(0xcfc4ab, 0.9); mats.terracotta = flat(0xa05f46, 0.75); mats.bronze = flat(0x63503a, 0.4, 0.9);
     mats.foliageOlive = flat(0x6e7b57, 0.95); mats.foliageCypress = flat(0x38492f, 0.95); mats.trunk = flat(0x584634, 0.95);
     mats.marbleStatue = flat(0xe9e0c8, 0.5); mats.marbleRelief = flat(0xd6c9ac, 0.85); mats.bronzePatina = flat(0x5a7869, 0.7, 0.5);
@@ -363,7 +363,21 @@ window.buildMats = function (THREE) {
     var height = new Float32Array(res * res);
     var rough = new Float32Array(res * res);
     var x, y;
-    var stone = [176, 158, 122], band = [140, 124, 94], crack = [86, 76, 62], lichen = [134, 146, 88];
+    // realism3 art-director fix: r1/r2 left this tan/khaki (176,158,122 stone / 140,124,94 band)
+    // -- fine at cliff scale under override uvScale=220 (broad soft gradient), but the SAME field
+    // is also sampled at native uvScale=8 for the perimeter walls (07-walls.js) and other small
+    // ashlar objects, where the sine-driven bandMask completes close to one full light/dark cycle
+    // per object -- combined with that tan-vs-dark-tan contrast it read as brown horizontal
+    // wood-grain planking rather than stone. Desaturated toward pale grey-ochre limestone (much
+    // smaller stone/band spread: 26 vs the old 54) so the same texture reads as mottled ashlar at
+    // both scales instead of striped boards.
+    // realism3 r1 art-director pass: stone was reading blown-out/pale in direct sun once the
+    // key light multiplied it -- lifted stone RGB back up (178,170,153) to restore color without
+    // reintroducing the old yellow (band/crack/lichen untouched in hue, so the stone-band spread
+    // widens slightly to 25; the bandMask blend weight below is cut further to compensate so this
+    // doesn't reopen the hard-stripe look). lichen restored toward the proportional desaturation
+    // ratio (~0.48x off the pre-realism3 tan values) that r1's edit had accidentally broken.
+    var stone = [178, 170, 153], band = [139, 131, 114], crack = [80, 73, 62], lichen = [130, 140, 100];
     // Fixed seeded phase offsets for the multi-frequency strata sines (deterministic hash, no RNG).
     var hp1 = hashP(1, 3, seed + 11, 97, 97) * 6.28318;
     var hp2 = hashP(5, 2, seed + 12, 97, 97) * 6.28318;
@@ -381,9 +395,17 @@ window.buildMats = function (THREE) {
         var vp1 = v * 5 + warpBig + warpSmall;
         var vp2 = v * 9 + warpBig * 1.3 + warpSmall * 0.6;
         var vp3 = v * 17 + warpSmall * 1.4;
-        var s1 = Math.sin(vp1 * Math.PI * 2 + hp1);
-        var s2 = Math.sin(vp2 * Math.PI * 2 + hp2) * 0.55;
-        var s3 = Math.sin(vp3 * Math.PI * 2 + hp3) * 0.3;
+        // realism3 r1: wall close-ups still read as fine corrugated/wood-grain stripes because
+        // small ashlar blocks (H.instance's shared unit BoxGeometry, native 0..1 face UV once
+        // rockDark lost its UV_SCALE entry) each show the WHOLE strata field -- all ~17 cycles of
+        // vp3 crammed into one short block face. The oscillation depth (not just the diffuse
+        // color blend below) also drives the height/normal map, so its bump shading was the
+        // dominant "planking" cue. Cut all three sine amplitudes 25% so a fully-compressed field
+        // reads as soft mottling rather than tight ridges, while cliffs (large uvScale override,
+        // only a small slice of the field per face) keep visible geological banding.
+        var s1 = Math.sin(vp1 * Math.PI * 2 + hp1) * 0.75;
+        var s2 = Math.sin(vp2 * Math.PI * 2 + hp2) * 0.55 * 0.75;
+        var s3 = Math.sin(vp3 * Math.PI * 2 + hp3) * 0.3 * 0.75;
         var stripeSum = clamp01((s1 + s2 + s3) / 1.85 * 0.5 + 0.5);
         var lo = 0.5 - 0.2 * thickness, hi = 0.5 + 0.2 * thickness;
         var bandMask = smooth(lo, hi, stripeSum) * breakMask;
@@ -405,7 +427,13 @@ window.buildMats = function (THREE) {
         var grain = fbmTile(u, v, seed + 55, 16, 16, 3, 0.5);
         height[i] = clamp01(0.5 + (bandMask - 0.5) * 0.45 + (grain - 0.5) * 0.4 - crackMask * 0.5 - jointMask * 0.5 - bandEdge * 0.4);
         rough[i] = clamp01(0.85 + crackMask * 0.1 + jointMask * 0.06 - lichenMask * 0.06 + (grain - 0.5) * 0.06);
-        var c = lerpC(stone, band, bandMask * 0.65);
+        // realism3: bandMask weight eased 0.65 -> 0.4 -> 0.28 so the horizontal strata read as a
+        // soft tonal shift (real bedding planes) rather than a hard-edged stripe -- r1's close-up
+        // wall shots still showed residual banding inside individual ashlar blocks at 0.4. Cliffs
+        // (override uvScale=220) still read clearly stratified since the shadow-carrying
+        // jointMask/crackMask/bandEdge terms below are untouched; only the flat colour swing
+        // between courses is softened further.
+        var c = lerpC(stone, band, bandMask * 0.28);
         c = lerpC(c, crack, crackMask * 0.55);
         c = lerpC(c, crack, jointMask * 0.35);
         c = lerpC(c, lichen, lichenMask);
@@ -436,7 +464,17 @@ window.buildMats = function (THREE) {
   mats.rock = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: rk.map, normalMap: rk.normalMap, roughnessMap: rk.roughnessMap, normalScale: new THREE.Vector2(1.1, 1.1) });
   var rkd = paintRockVariant(rockField, 0.66, 0.04, 22);
   mats.rockDark = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: rkd.map, normalMap: rkd.normalMap, roughnessMap: rkd.roughnessMap, normalScale: new THREE.Vector2(1.1, 1.1) });
-  addGroundGrime(mats.rock); addGroundGrime(mats.rockDark);
+  // realism3: addGroundGrime's docstring is explicit that it only reads correctly on pieces
+  // "authored with its own y=0 at its base" (H.makeSteppedBase/makeEntablature/... -- the marble
+  // family). rock/rockDark are instead consumed largely through H.instance() with a plain centered
+  // BoxGeometry(1,1,1) (07-walls.js's ashlar courses, H.makeWall, the south-slope back walls) whose
+  // LOCAL vertex Y always sits in [-0.5, 0.5] no matter which course it is or how high the wall
+  // actually stands. That constant "at grade" reading pushed every single course toward the same
+  // brown grimeColor mix (~21-42%), flattening the whole wall to one uniform muddy brown regardless
+  // of height -- the main reason it read as stacked wood planking rather than coursed stone. Rock's
+  // own painted texture (genRockField's crack/joint/lichen terms above) already carries plenty of
+  // weathering, so the extra vertex-based grime pass is simply dropped for this family rather than
+  // left mis-firing on every non-y0-based consumer.
 
   // =================================================================
   // GROUND: dry Attic soil, pebbles, sparse dry grass flecks.
@@ -449,7 +487,12 @@ window.buildMats = function (THREE) {
     // can't touch the light from here, push the base palette further: nearly neutral R~=G~=B
     // (killing almost all of the remaining warm R-B bias) plus a small G/B lift so the residual
     // cast trends grey-blue rather than grey-beige-warm once the key light multiplies it.
-    var soil = [151, 153, 150], soilDark = [124, 127, 123], pebbleLt = [171, 173, 168], pebbleDk = [101, 103, 100], fleck = [144, 146, 141];
+    // realism3: r2 pushed this to a near-neutral grey-blue (151,153,150, G/B >= R) to fight the
+    // warm key light, but the art director's target is a warm dusty grey-beige (~175,168,155 in
+    // sun), not grey-blue -- nudged back to a gentle warm-grey bias (R slightly > G > B) while
+    // keeping the overall value and saturation low, so the sun's own warmth lands near the target
+    // instead of overshooting into yellow.
+    var soil = [151, 147, 137], soilDark = [123, 120, 111], pebbleLt = [170, 165, 152], pebbleDk = [100, 97, 90], fleck = [143, 139, 128];
     var x, y;
     for (y = 0; y < res; y++) {
       var v = (y + 0.5) / res;
@@ -711,9 +754,24 @@ window.buildMats = function (THREE) {
   // ---------------------------------------------------------------
   // Real-world-scale tile sizes (metres per texture repeat), read by finishScene.
   // ---------------------------------------------------------------
+  // realism3 r1: rockDark's bare (non-clone) consumers are all H.instance() InstancedMesh ashlar
+  // -- 07-walls.js's wall courses/towers/bastion, 08-southslope's back walls/niches -- built from
+  // one shared unit BoxGeometry(1,1,1) per H.instance() call. With no uvScale entry at all
+  // (r0's fix), that geometry keeps its native per-face 0..1 box UV, so EVERY course maps the
+  // *entire* strata field (all ~17 vp3 cycles) onto its own ~1m-tall face -- exactly the fine
+  // repetitive corrugation the art director flagged as "residual horizontal strata banding" /
+  // wood-grain, no better than r0's screenshots showed. This is the same "tight regular ripple
+  // when box-projected onto a small/shallow surface at its native tile" bug 03-terrain.js's
+  // plateau/cliff overrides (150/220) and 08-southslope's apronMat (150) already work around --
+  // so give rockDark's own bare consumers the same fix: a large tile so the compressed crop each
+  // block sees only fine grain-level micro-variation, not full strata cycles. (finishScene's
+  // box-projected UV is identical for every instance under one InstancedMesh regardless of the
+  // chosen scale, since it's derived from the shared local geometry, not per-instance world
+  // position -- that per-instance limitation is the pre-existing "broader finishScene
+  // architecture" issue called out as out of scope; this only fixes which crop gets shown.)
   var UV_SCALE = {
     marble: 1.3, marbleWorn: 1.3, marbleShadowed: 1.4, marbleStatue: 0.9, marbleRelief: 1.3,
-    rock: 10, rockDark: 8, ground: 4, city: 4, terracotta: 1.4,
+    rock: 10, rockDark: 95, ground: 4, city: 4, terracotta: 1.4,
     bronze: 2, bronzePatina: 2, foliageOlive: 3, foliageCypress: 3, trunk: 1.1,
     gold: 1, ivory: 1.4, grass: 6, scrub: 4, plaster: 3,
   };
@@ -2149,14 +2207,22 @@ window.buildTerrain = function (THREE, mats, H) {
   }
   function plateauHeight(x, z) {
     var e = sqrt((x / 150) * (x / 150) + (z / 75) * (z / 75));
-    var bedrock = H.noise2(x * 0.04, z * 0.055, 23); // -1..1
-    var slab = clamp01((bedrock - 0.32) / 0.2); // a handful of raised bedrock slabs, smooth-edged
-    // Fine ripple gated off within ~30m of the rim fold (tighter than the previous ~50m band) and
-    // with a quartic (t^4) falloff instead of the cubic smoothstep, so the amplitude collapses to
-    // zero much faster right at the rim instead of trailing off as a visible wave.
-    var rippleT = (e - 0.80) / 0.06 < 0 ? 0 : (e - 0.80) / 0.06 > 1 ? 1 : (e - 0.80) / 0.06;
-    var rippleGate = 1 - rippleT * rippleT * rippleT * rippleT;
-    var y = 0.03 * fineWeather(x, z) * rippleGate + 0.22 * slab; // <= ~0.25m of texture + step, everywhere
+    // Interior of the plaza: a nearly flat rock platform. Fine mottling only, capped well under
+    // the 0.15m relief budget -- no broad slab bumps or long-wavelength dune-like swells.
+    var micro = 0.05 * fineWeather(x, z); // +-0.05m fine surface texture, everywhere
+    // A handful of exposed bedrock ledges, confined to a narrow band hugging the rim (inside the
+    // rim fold itself): gated both by radius (a tight ring just short of e=0.86, where the fold
+    // begins) and by a sparse noise threshold, so only a few isolated ledges break the platform
+    // instead of a field of raised slabs scattered across the whole summit.
+    var bedrock = H.noise2(x * 0.028, z * 0.042, 23); // -1..1, coarse so ledges read as distinct outcrops
+    var edgeBand = 0;
+    if (e > 0.66 && e < 0.86) {
+      var eIn = smooth(clamp01((e - 0.66) / 0.05));
+      var eOut = smooth(clamp01((0.86 - e) / 0.05));
+      edgeBand = eIn * eOut;
+    }
+    var ledge = clamp01((bedrock - 0.62) / 0.1) * edgeBand * 0.4; // up to ~0.4m, sparse, rim-only
+    var y = micro + ledge;
     if (e > 0.86) y -= (e - 0.86) * 34; // rim fold: blends into the cliff mesh, not "undulation"
     return y - cutAt(x, z);
   }
@@ -3410,21 +3476,26 @@ window.buildWalls = function (THREE, mats, H) {
   }
 
   // ---- Battered ashlar/rubble masonry: courses of instanced blocks, wall battered inward with height ----
+  // Small seeded LCG (deterministic, no engine RNG): drives per-block length/height/offset jitter.
+  function wallRand(seed) {
+    var s2 = seed >>> 0;
+    return function () { s2 = (s2 * 1664525 + 1013904223) >>> 0; return s2 / 4294967296; };
+  }
   var courseGeo = new THREE.BoxGeometry(1, 1, 1);
   var wallT = [], capT = [], parapetT = [];
-  var courseH = 1.05;
+  var courseH = 1.1;
   for (var sr = 0; sr < allSubRuns.length; sr++) {
     var run = allSubRuns[sr].points, wallH = allSubRuns[sr].h;
     var courses = Math.round(wallH / courseH);
     var baseThick = 3.4;
-    // total polyline length -> place blocks at even spacing per course, offset every other course (running bond)
+    // total polyline length -> place blocks of varied length per course, with a randomized start
+    // offset each course so the head joints stagger irregularly (no repeating running-bond pattern).
     for (var c = 0; c < courses; c++) {
       var frac = c / courses;
-      var batter = baseThick * (1 - 0.22 * frac); // wall thins slightly as it rises
+      var batter = baseThick * (1 - 0.26 * frac); // wall thins (battered face) as it rises
       var cy = c * courseH + courseH / 2;
-      var blockLen = 3.6 + 0.7 * ((c % 2)); // coarsened further: frees triangle budget for the land pass's density work
-      var offset = (c % 2) * blockLen * 0.5;
-      var dist = -offset;
+      var rng = wallRand(3000 + sr * 977 + c * 131);
+      var dist = -(rng() * 2.3);
       for (var seg = 0; seg < run.length - 1; seg++) {
         var p0 = run[seg], p1 = run[seg + 1];
         var dx = p1[0] - p0[0], dz = p1[1] - p0[1];
@@ -3432,11 +3503,20 @@ window.buildWalls = function (THREE, mats, H) {
         var ang = Math.atan2(dz, dx);
         var d0 = dist;
         while (d0 < segLen) {
+          // Each block's own length, drawn fresh so courses read as irregular coursed rubble
+          // (varied 0.8-2.5m blocks) instead of one long uniform "plank".
+          var blockLen = 0.8 + rng() * 1.7;
           if (d0 >= 0) {
             var t = d0 / segLen;
             var bx = p0[0] + t * dx, bz = p0[1] + t * dz;
-            var thisLen = Math.min(blockLen, segLen - d0) * (0.9 + 0.1 * H.noise2(bx, cy, 1));
-            wallT.push({ p: [bx + Math.cos(ang) * thisLen / 2, cy, bz + Math.sin(ang) * thisLen / 2], r: [0, -ang, 0], s: [thisLen * 0.96, courseH * 0.94, batter] });
+            var thisLen = Math.min(blockLen, segLen - d0);
+            var hJit = 0.78 + rng() * 0.36; // per-block height variation
+            var faceJit = (rng() - 0.5) * 0.12 * batter; // tiny in/out jitter: no two faces perfectly flush
+            var cyJit = cy + (rng() - 0.5) * courseH * 0.1;
+            wallT.push({
+              p: [bx + Math.cos(ang) * thisLen / 2 - Math.sin(ang) * faceJit, cyJit, bz + Math.sin(ang) * thisLen / 2 + Math.cos(ang) * faceJit],
+              r: [0, -ang, 0], s: [thisLen * 0.92, courseH * hJit, batter]
+            });
           }
           d0 += blockLen;
         }
@@ -3818,19 +3898,33 @@ window.buildSouthSlope = function (THREE, mats, H) {
     }
     return f;
   }
+  // Outer-edge blend: the apron is a flat 260x120 rock-outcrop patch (see H.makeRockOutcrop call
+  // above), so without this its south/city-facing and lateral edges just stop -- a thick, dead-flat
+  // slab boundary hanging above the plain. Pull those true mesh edges down to the plain (y=-80) over
+  // the last stretch of each axis so the hillside visibly runs out to meet the city ground instead of
+  // ending in a hard line. The hill-facing edge (negative local z, tucked under the plateau's own
+  // cliff mesh) is left alone.
+  var apronHalfX = 130, apronHalfZ = 60; // half-extents of the 260 x 120 outcrop plane
+  function apronEdgeFactor(xl, zl) {
+    var zf = zl > 0 ? clamp01((zl / apronHalfZ - 0.8) / 0.2) : 0;
+    var xf = clamp01((Math.abs(xl) / apronHalfX - 0.86) / 0.14);
+    var t = Math.max(zf, xf);
+    return t * t * (3 - 2 * t);
+  }
   apron.updateMatrix();
   var toWorld = apron.matrix.clone();
   var toLocal = new THREE.Matrix4().copy(toWorld).invert();
   var apPos = apron.geometry.getAttribute('position');
   var v = new THREE.Vector3();
   for (var k = 0; k < apPos.count; k++) {
+    var xl0 = apPos.getX(k), zl0 = apPos.getZ(k);
     v.fromBufferAttribute(apPos, k).applyMatrix4(toWorld);
     var fl = floorAt(v.x, v.z);
-    if (v.y > fl) {
-      v.y = fl;
-      v.applyMatrix4(toLocal);
-      apPos.setXYZ(k, v.x, v.y, v.z);
-    }
+    if (v.y > fl) v.y = fl;
+    var et = apronEdgeFactor(xl0, zl0);
+    if (et > 0) v.y = v.y * (1 - et) + (-80) * et;
+    v.applyMatrix4(toLocal);
+    apPos.setXYZ(k, v.x, v.y, v.z);
   }
   apPos.needsUpdate = true;
   apron.geometry.computeVertexNormals();
@@ -3936,10 +4030,11 @@ window.buildScenery = function (THREE, mats, H) {
   // ---------------- Olive groves: gnarled, twisted trunks with clumpy grey-green canopies ----------------
   var oliveTrees = [];
   var oliveCount = 0;
-  var maxAttempts = 1000;
+  var maxAttempts = 2000;
   var attempts = 0;
 
-  while (oliveCount < 34 && attempts < maxAttempts) {
+  var oliveTarget = MOBILE ? 34 : 46;
+  while (oliveCount < oliveTarget && attempts < maxAttempts) {
     attempts++;
     var angle = rnd() * Math.PI * 2;
     // Kept inside the flat esplanade (e < ~0.86): trees sit at a fixed trunk height, and past
@@ -3981,6 +4076,7 @@ window.buildScenery = function (THREE, mats, H) {
   tp.needsUpdate = true;
   trunkGeo.computeVertexNormals();
 
+  var trunkTopY = 2.05; // where the bare trunk ends and the crown of branches begins
   var oliveTrunkTransforms = [];
   for (var i = 0; i < oliveTrees.length; i++) {
     var ot = oliveTrees[i];
@@ -3998,21 +4094,31 @@ window.buildScenery = function (THREE, mats, H) {
   }
   group.add(H.instance(rootGeo, mats.trunk, rootT));
 
-  // Clumpy canopies: 6-7 smaller, more widely-spaced blobs per tree with visible gaps between
-  // them, instead of a few large lobes that merge into one smooth silhouette at a distance.
+  // Visible branches: a few thin gnarled limbs fork from the bare trunk top up toward each main
+  // canopy clump, so the crown reads as foliage carried on woodwork instead of a blob glued to a
+  // post. Cheap open-ended 4-sided cylinder (8 tris) per branch, oriented exactly at its clump.
+  // Orientation is worked out with plain trig (no Vector3/Quaternion) so a unit direction
+  // (dx,dy,dz) maps to an XYZ Euler [asin(dz), 0, atan2(-dx,dy)] that carries the cylinder's local
+  // +Y axis onto that direction.
+  var branchGeo = new THREE.CylinderGeometry(0.05, 0.11, 1, 4, 1, true);
+  var branchT = [];
+
+  // Clumpy canopies: several smaller, more widely-spaced blobs per tree with visible gaps between
+  // them (and the bare branch carrying each one visible beneath it), instead of a few large lobes
+  // that merge into one smooth silhouette at a distance.
   var oliveCanopyTransforms = [];
   for (var i = 0; i < oliveTrees.length; i++) {
     var tree = oliveTrees[i];
-    var lobes = 6 + (i % 2);
+    var lobes = 4 + (i % 2);
     for (var j = 0; j < lobes; j++) {
       var offsetAngle = (j / lobes) * Math.PI * 2 + rnd() * 0.6;
-      // Lobe separation widened ~20% so the gaps between clumps stay legible at medium distance
-      // (>200m) instead of the crown reading as one fused blob.
-      var offsetDist = 1.8 + rnd() * 1.56;
+      // Lobe separation kept wide relative to each clump's own (smaller) size so the gaps between
+      // clumps stay legible at medium distance instead of the crown reading as one fused blob.
+      var offsetDist = 1.5 + rnd() * 1.5;
       var offsetX = tree.x + Math.cos(offsetAngle) * offsetDist;
       var offsetZ = tree.z + Math.sin(offsetAngle) * offsetDist;
-      var offsetY = 3.0 + (rnd() - 0.5) * 2 * 1.0;
-      var scale = 0.5 + rnd() * 0.4;
+      var offsetY = 3.15 + (rnd() - 0.5) * 2 * 0.85;
+      var scale = 0.36 + rnd() * 0.3; // smaller clumps than before (was 0.5-0.9)
       // Independent per-axis scale (0.8-1.3x each) so every lobe is a lopsided, irregular clump
       // rather than a scaled-uniform icosahedron -- breaks the "perfect blob" geometric look.
       var lcx = 0.8 + rnd() * 0.5, lcz = 0.8 + rnd() * 0.5;
@@ -4021,16 +4127,31 @@ window.buildScenery = function (THREE, mats, H) {
         r: [rnd() * PI, rnd() * PI, rnd() * PI],
         s: [scale * lcx, scale * (0.75 + rnd() * 0.3), scale * lcz]
       });
+      // A branch reaching from the trunk top to just under this clump (skip the odd tallest lobe
+      // so a bit of canopy still floats free of visible woodwork, as real crowns do).
+      if (j < 3) {
+        var bdx = offsetX - tree.x, bdy = (offsetY - 0.3 * scale) - trunkTopY, bdz = offsetZ - tree.z;
+        var blen = Math.sqrt(bdx * bdx + bdy * bdy + bdz * bdz) || 0.001;
+        var bnx = bdx / blen, bny = bdy / blen, bnz = bdz / blen;
+        var bPitch = Math.asin(Math.max(-1, Math.min(1, bnz)));
+        var bYaw = Math.atan2(-bnx, bny);
+        branchT.push({
+          p: [tree.x + bnx * blen * 0.5, trunkTopY + bny * blen * 0.5, tree.z + bnz * blen * 0.5],
+          r: [bPitch, 0, bYaw],
+          s: [1, blen, 1]
+        });
+      }
     }
     // A central anchor lobe so the crown still reads as one tree, not just a ring of blobs.
     var acx = 0.85 + rnd() * 0.4, acz = 0.85 + rnd() * 0.4;
     oliveCanopyTransforms.push({
-      p: [tree.x, 3.0 + (rnd() - 0.5), tree.z],
+      p: [tree.x, 3.05 + (rnd() - 0.5), tree.z],
       r: [rnd() * PI, rnd() * PI, rnd() * PI],
-      s: [0.85 * acx, 0.65, 0.85 * acz]
+      s: [0.58 * acx, 0.46, 0.58 * acz]
     });
   }
-  group.add(H.instance(new THREE.IcosahedronGeometry(1.7, 0), mats.foliageOlive, oliveCanopyTransforms));
+  group.add(H.instance(branchGeo, mats.trunk, branchT));
+  group.add(H.instance(new THREE.IcosahedronGeometry(1.55, 0), mats.foliageOlive, oliveCanopyTransforms));
 
   // Cypresses live in 08-southslope, which drops them onto the carved rock apron
 
@@ -4840,6 +4961,11 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var span = opts.span || 1;
     var lean = opts.lean;
     var bulge = opts.bulge;
+    // crispMin: raises the floor of the crease "crispness" mix (see below) so folds
+    // read as sharp angular creases more often instead of soft undulations — used
+    // for heavy wool peplos (caryatids) where the director asked for deep flutes
+    // with sharp crests. 0 (default) leaves every existing caller's look untouched.
+    var crispMin = opts.crispMin || 0;
     var seed = opts.seed || 1;
     // subtle high-frequency surface variation so lathed skin doesn't read as a perfectly smooth
     // plastic taper at shoulder/hip/waist transitions; small amplitude, non-integer-multiple
@@ -4872,7 +4998,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
       // blend a sharp "tent" crease with a soft sinusoid, the mix itself varying
       // by angle/seed, so some ridges catch light as crisp creases and others as
       // shallow, softly-shadowed undulations rather than every fold looking alike.
-      var crispness = 0.5 + 0.5 * sin(1.1 * theta + irregPhaseC);
+      var crispness = Math.max(crispMin, 0.5 + 0.5 * sin(1.1 * theta + irregPhaseC));
       var foldShape = crispness * triWave(vFoldCount * theta + phase + phaseDrift) + (1 - crispness) * sin(vFoldCount * theta + phase + phaseDrift);
       var fold = 1 + vFold * bias * ampMod * foldShape
         + catAmp * ampMod * sin(catFreq * yFrac * PI * 2 + 2.6 * sin(theta + phase))
@@ -4944,7 +5070,17 @@ window.addFigureHelpers = function (THREE, mats, H) {
       push += 0.04 * size * gaussFall(ny + 0.34, 0.05) * gaussFall(nx, 0.17) * front;
       push += 0.13 * size * gaussFall(ny + 0.44, 0.16) * front;               // chin
       var jawPull = (ny < -0.05 && ny > -0.55) ? 0.055 * size * gaussFall(ny + 0.26, 0.24) * Math.max(0, abs(nx) - 0.28) : 0;
-      var r = d + push - jawPull;
+      // hair, sculpted directly into the head sphere (no extra triangles): a modest
+      // volume over the crown/back (nz < 0, i.e. away from the face) plus a shallow
+      // hairline groove where it meets the forehead, so a head reads as "hair + face"
+      // rather than a bald dome even where a separate hair shell would clip into
+      // something resting on the head (a capital, a helmet). hairBack scales the
+      // effect per caller (0 = none, >1 = heavier, as for a caryatid's coiffure).
+      var hairBack = opts.hairBack !== undefined ? opts.hairBack : 1;
+      var backAmt = Math.max(0, -nz);
+      var hairVol = hairBack * 0.065 * size * backAmt * Math.max(0, ny + 0.05);
+      var hairLine = hairBack * 0.022 * size * gaussFall(ny - 0.50, 0.06) * (1 - front);
+      var r = d + push - jawPull + hairVol - hairLine;
       arr[i] = nx * r; arr[i + 1] = ny * r; arr[i + 2] = nz * r;
     }
     pos.needsUpdate = true;
@@ -5095,14 +5231,42 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // headSize is the head sphere's radius, so a ~1-head-unit crown-to-chin diameter is
     // 2*headSize =~ height/7.5, i.e. headSize =~ height/15.
     var ankleY = 0.065 * height, kneeY = 0.205 * height, hipY = 0.467 * height,
-      shoulderY = 0.80 * height, neckBaseY = 0.865 * height, headSize = 0.041 * height;
+      shoulderY = 0.80 * height, neckBaseY = 0.865 * height, headSize = 0.044 * height;
     var headTopY = height;
 
-    var rHem = 0.075 * height, rCalf = 0.062 * height, rKnee = 0.052 * height, rHip = 0.100 * height,
-      rWaist = 0.078 * height, rChest = 0.100 * height, rShoulder = 0.112 * height, rNeck = 0.044 * height;
+    // Director's r2 review ("massive and draped... heavy bodies"): the Parthenon
+    // pediment marbles are over-life-size and thickset — the previous radii
+    // (tuned for a slim votive figure) made every statue look like a thin
+    // mannequin regardless of pose. ~14% broader through torso/hips by default
+    // (bodyBulk = 1); legs/waist keep more of a taper so the extra mass reads at
+    // the chest/shoulders, not as a uniform bloat. bodyBulk: 0 (Promachos, whose
+    // silhouette the director already signed off on) keeps the original slim
+    // proportions untouched.
+    // Director's r1 review (minor: bulk still doesn't read as "massive" at scene
+    // distance): the bulked targets below gave chest/shoulder/hip only ~14-16%
+    // over the slim base radii. Pushed to ~18-20% and, per the director's note
+    // that mass was concentrated at the chest/shoulders, raised the lower-leg
+    // (calf/knee) targets too so the extra bulk distributes down the whole body
+    // instead of just the torso.
+    var bodyBulk = opts.bodyBulk !== undefined ? opts.bodyBulk : 1;
+    function bulkR(base, bulked) { return (base + bodyBulk * (bulked - base)) * height; }
+    var rHem = bulkR(0.075, 0.079), rCalf = bulkR(0.062, 0.070), rKnee = bulkR(0.052, 0.062),
+      rHip = bulkR(0.100, 0.119), rWaist = bulkR(0.078, 0.091), rChest = bulkR(0.100, 0.119),
+      rShoulder = bulkR(0.112, 0.133), rNeck = bulkR(0.044, 0.047);
 
     var contrapposto = opts.contrapposto !== false;
-    var weightSide = opts.weightSide || 1; // +1 = weight on figure's right leg (their -x side)
+    // Director's r1 review (majors: pediment figures lack per-slot pose variety):
+    // true seated/reclining/striding slot poses require changing H.makePediment's
+    // slot-assignment logic in 02-helpers.js, outside this module's ownership
+    // (src/13-figures.js only). Within this file's own reach, every unseeded
+    // caller (all of H.makePediment's 'stand'/'kneel'/'recline' figures) was
+    // still defaulting to the exact same weightSide=1 — identical contrapposto
+    // lean, identical weight-bearing arm, identical fold bias on every figure.
+    // Auto-alternating it per seed (still fully deterministic, no runtime RNG)
+    // gives real mirrored-stance variety across a pediment row at zero extra
+    // triangle cost. Explicit callers (e.g. the Promachos, which wants a
+    // specific known-good stance) are unaffected.
+    var weightSide = opts.weightSide !== undefined ? opts.weightSide : (rnd() < 0.5 ? 1 : -1);
     function lean(yFrac) {
       if (!contrapposto) return { x: 0, twist: 0 };
       var s = yFrac;
@@ -5110,6 +5274,23 @@ window.addFigureHelpers = function (THREE, mats, H) {
         x: weightSide * height * leanScale * (0.016 * sin(PI * s) + 0.008 * sin(2 * PI * s)),
         twist: weightSide * 0.09 * leanScale * sin(PI * s)
       };
+    }
+
+    // Free-leg knee push: about half of standing figures (deterministic per seed)
+    // get the free (non-weight-bearing) leg's knee pressing forward through the
+    // drape, exactly like the caryatid's bent leg — a cheap (no extra triangles,
+    // pure vertex displacement) way to break up the "row of identical mannequins"
+    // silhouette with real pose variety (a striding/mid-step read) instead of
+    // every figure standing perfectly frontal.
+    var hasKneePush = opts.kneePush !== undefined ? opts.kneePush : (rnd() < 0.5);
+    var kneePushSide = -weightSide; // the free leg is opposite the weight-bearing one
+    function stanceBulge(theta, yFrac) {
+      if (!hasKneePush) return 0;
+      var kneeFrac = kneeY / neckBaseY;
+      var thetaFree = kneePushSide > 0 ? 0 : PI;
+      var nearKnee = gaussFall(yFrac - kneeFrac, 0.11);
+      var nearTheta = gaussFall(((theta - thetaFree + PI) % (2 * PI)) - PI, 0.85);
+      return 0.05 * height * nearKnee * nearTheta;
     }
 
     var profile = [
@@ -5124,11 +5305,24 @@ window.addFigureHelpers = function (THREE, mats, H) {
       new THREE.Vector2(rShoulder, shoulderY),
       new THREE.Vector2(rNeck, neckBaseY)
     ];
+    // Director's r1 review (major: Promachos silhouette compromised by the
+    // shared standing-figure crispMin/catAmp): both are now caller-overridable
+    // (default unchanged, 0.30 / 0.09) so the Promachos alone can dial back the
+    // angular crease bias and large-scale swag that were breaking up her
+    // previously-approved clean silhouette, without softening every other
+    // standing/pediment figure's drapery.
+    var stanceCrispMin = opts.crispMin !== undefined ? opts.crispMin : 0.30;
+    var catAmpBase = opts.catAmpBase !== undefined ? opts.catAmpBase : 0.09;
     var body = foldedLathe(profile, {
-      material: mat, seed: seed, span: neckBaseY, lean: lean, radial: bodyRadial,
-      // Director's r1 review: fold amplitude/count were too shallow/sparse to
-      // read as drapery at all (0.15 depth, 16 ridges) — deepened and densified.
-      vFoldCount: 20, vFold: 0.23 * foldScale, catAmp: 0.09 * foldScale, catFreq: 2.2,
+      material: mat, seed: seed, span: neckBaseY, lean: lean, radial: bodyRadial, bulge: stanceBulge,
+      // Director's r1/r2 review: fold amplitude/count were too shallow/sparse to
+      // read as drapery at all — deepened a little further and biased toward
+      // sharper creases (crispMin) for "heavy body, heavy draped cloth" rather
+      // than a thin sheet. catAmp (the large-scale swag) is left at its r1 value:
+      // it scales with `foldScale`, and callers that push foldScale hard (the
+      // Promachos, 2x+) turned a bigger catAmp into a swollen, deformed torso
+      // rather than visible drapery relief.
+      vFoldCount: 22, vFold: 0.25 * foldScale, catAmp: catAmpBase * foldScale, catFreq: 2.2, crispMin: stanceCrispMin,
       vFoldBiasTheta: weightSide > 0 ? PI * 0.15 : PI * 1.15, vFoldBiasAmt: 0.5
     });
     group.add(body);
@@ -5192,15 +5386,27 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var neck = taperedLimb(new THREE.Vector3(lean(neckBaseY / neckBaseY).x, neckBaseY, 0), new THREE.Vector3(lean(1).x, neckBaseY + 0.045 * height, 0), rNeck, rNeck * 0.9, neckSeg, mat);
     group.add(neck);
 
-    var headGroup = makeHead(headSize, { material: mat, hairMaterial: opts.hairMaterial || mat, lowRes: LOD, hair: !LOD });
+    // Authentic breakage, head: surviving pediment marbles frequently lost the
+    // head entirely (falling from a raking cornice does that) — about 1 in 8
+    // standing figures loses theirs to a weathered stump instead of a carved
+    // face, alongside the arm breakage above. Disabled for statues whose head
+    // is load-bearing for other geometry (Promachos's helmet, any caller that
+    // explicitly opts out).
+    var headBreak = (opts.headBreak !== false) && rnd() < 0.125;
     var headLean = lean(1);
-    headGroup.position.set(headLean.x, neckBaseY + 0.045 * height + headSize * 0.95, headLean.z || 0);
-    // Heads turned off-axis break up the "row of identical mannequins" look —
-    // deterministic per seed, and skippable (headTurn: 0) for statues like the
-    // Promachos whose helmet geometry assumes a forward-facing head.
-    var headTurnRange = opts.headTurn !== undefined ? opts.headTurn : 0.9;
-    headGroup.rotation.y = (rnd() - 0.5) * headTurnRange;
-    group.add(headGroup);
+    var headPos = new THREE.Vector3(headLean.x, neckBaseY + 0.045 * height + headSize * 0.95, headLean.z || 0);
+    if (headBreak) {
+      group.add(brokenStump(headPos, rNeck * 0.9, seed + 404, mat));
+    } else {
+      var headGroup = makeHead(headSize, { material: mat, hairMaterial: opts.hairMaterial || mat, lowRes: LOD, hair: !LOD });
+      headGroup.position.copy(headPos);
+      // Heads turned off-axis break up the "row of identical mannequins" look —
+      // deterministic per seed, and skippable (headTurn: 0) for statues like the
+      // Promachos whose helmet geometry assumes a forward-facing head.
+      var headTurnRange = opts.headTurn !== undefined ? opts.headTurn : 0.9;
+      headGroup.rotation.y = (rnd() - 0.5) * headTurnRange;
+      group.add(headGroup);
+    }
 
     return { group: group, hipY: hipY, shoulderY: shoulderY, headTopY: headTopY, maxR: Math.max(rShoulder, rHip), headSize: headSize };
   }
@@ -5367,7 +5573,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
 
     var shoulderY = 0.775 * height;
     var neckBaseY = 0.815 * height;
-    var headSize = 0.084 * height;
+    var headSize = 0.090 * height;
     // alternate which leg bears the weight, mirroring the real porch's arrangement
     var supportSide = (callIdx % 2 === 0) ? 1 : -1;
 
@@ -5377,7 +5583,11 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // to visually carry an entablature. Widened the shoulder/chest, kept the
     // waist relatively slim so it still nips in above the hip for a readable
     // torso shape instead of a uniform tube.
-    var rBase = 0.188, rCalf = 0.176, rKnee = 0.188, rHip = 0.228, rWaist = 0.185, rChest = 0.236, rShoulder = 0.238, rNeck = 0.096;
+    // Director's r3 review ("still reads as blocky pegs"): another ~5% of body
+    // volume on top of that, and the waist held (not grown) so it nips in more
+    // clearly against the now-fuller hip/chest — a woman's silhouette, not a
+    // uniformly thick column.
+    var rBase = 0.196, rCalf = 0.184, rKnee = 0.196, rHip = 0.240, rWaist = 0.188, rChest = 0.248, rShoulder = 0.250, rNeck = 0.098;
     var profile = [
       new THREE.Vector2(rBase, plinthH),
       new THREE.Vector2(rCalf, 0.14 * height),
@@ -5390,15 +5600,21 @@ window.addFigureHelpers = function (THREE, mats, H) {
       new THREE.Vector2(rNeck, neckBaseY)
     ];
     var body = foldedLathe(profile, {
-      material: mat, seed: seed, span: neckBaseY, radial: MOBILE ? 12 : 24,
-      // Director's r1 review: peplos still read smooth — deepened the fold
-      // amplitude/count and the catenary swag further for heavy, sculptural
-      // vertical folds (real korai drapery is thick wool, not a thin sheet).
-      vFold: 0.30, vFoldCount: 21, vFoldBiasTheta: supportSide > 0 ? 0 : PI, vFoldBiasAmt: 0.8,
-      catAmp: 0.13, catFreq: 3,
-      // the free leg's bent knee presses through the drapery as a localized bulge, and a seam
-      // running knee-to-ankle where the fabric is drawn tight over the shin — this is what
-      // differentiates the free leg's drape from the straight support leg's vertical folds.
+      material: mat, seed: seed, span: neckBaseY,
+      // Director's r3 review ("smooth LatheGeometry... 32+ radial segments"):
+      // bumped from 24 to 32 on desktop for genuinely smooth shoulder/hip curves.
+      radial: MOBILE ? 14 : 32,
+      // Director's r1/r3 review: peplos still read smooth/blocky — deepened the
+      // fold amplitude/count further and biased toward sharp angular creases
+      // (crispMin) for real "deep flutes with sharp crests" rather than a soft
+      // sinusoidal ripple.
+      vFold: 0.34, vFoldCount: 24, vFoldBiasTheta: supportSide > 0 ? 0 : PI, vFoldBiasAmt: 0.8,
+      catAmp: 0.14, catFreq: 3, crispMin: 0.55,
+      // the free leg's bent knee presses through the drapery as a localized bulge, a seam
+      // running knee-to-ankle where the fabric is drawn tight over the shin (differentiates
+      // the free leg's drape from the straight support leg's vertical folds), and a pair of
+      // frontal bust bulges at chest height so the peplos reads as worn over a womanly torso
+      // rather than a uniform cylinder (director's r3 review: "rounded... bust").
       bulge: function (theta, yFrac) {
         var kneeFrac = 0.28 * height / neckBaseY;
         var ankleFrac = 0.09 * height / neckBaseY;
@@ -5413,7 +5629,22 @@ window.addFigureHelpers = function (THREE, mats, H) {
         var seamFall = gaussFall(((theta - seamTheta + PI) % (2 * PI)) - PI, 0.16);
         var seamPull = -0.026 * height * seamProfile * seamFall;
 
-        return kneeBulge + seamPull;
+        // bust: front is -z (theta = -PI/2 in this module's convention), two lobes
+        // straddling the centreline at chest height.
+        // Director's r1 review (minor: bust undersized, silhouette still
+        // somewhat columnar): magnitude raised 0.040 -> 0.052x height and the
+        // angular falloff tightened 0.26 -> 0.20 so each lobe reads as a
+        // sharper, more clearly separated curve rather than a broad soft swell.
+        var chestFrac = (shoulderY * 0.90) / neckBaseY;
+        var bustFall = gaussFall(yFrac - chestFrac, 0.045);
+        var bust = 0;
+        for (var bSide = -1; bSide <= 1; bSide += 2) {
+          var bustTheta = -PI / 2 + bSide * 0.30;
+          var nearBustTheta = gaussFall(((theta - bustTheta + PI) % (2 * PI)) - PI, 0.20);
+          bust += 0.052 * height * bustFall * nearBustTheta;
+        }
+
+        return kneeBulge + seamPull + bust;
       }
     });
     group.add(body);
@@ -5427,7 +5658,12 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var neck = taperedLimb(new THREE.Vector3(0, neckBaseY, 0), new THREE.Vector3(0, neckBaseY + 0.035 * height, 0), rNeck, rNeck * 0.95, MOBILE ? 8 : 10, mat);
     group.add(neck);
 
-    var headGroup = makeHead(headSize, { material: mat, hair: false });
+    // hair:false — a full hair shell would poke through the echinus/abacus
+    // resting directly on the crown (see the capital below); hairBack instead
+    // sculpts hair volume/hairline straight into the head sphere itself (no
+    // extra geometry, so nothing can clip), pushed harder than the default for
+    // a heavier coiffure to match the heavy braids down the back.
+    var headGroup = makeHead(headSize, { material: mat, hair: false, hairBack: 2.2 });
     var headY = neckBaseY + 0.035 * height + headSize * 0.9;
     headGroup.position.y = headY;
     // a small per-figure head turn so the row doesn't read as identical pegs
@@ -5443,28 +5679,34 @@ window.addFigureHelpers = function (THREE, mats, H) {
     var braidTop = new THREE.Vector3(0, headY + headSize * 0.05, headSize * 0.90);
     for (var bi = -1; bi <= 1; bi += 2) {
       var top = braidTop.clone(); top.x = bi * headSize * 0.38;
-      var braid = buildBraid(top, new THREE.Vector3(0, -1, 0.05), shoulderY - headY + headSize * 1.3, headSize * 0.40, headSize * 0.11, MOBILE ? 8 : 15, seed + bi, mat);
+      var braid = buildBraid(top, new THREE.Vector3(0, -1, 0.05), shoulderY - headY + headSize * 1.3, headSize * 0.46, headSize * 0.13, MOBILE ? 8 : 15, seed + bi, mat);
       group.add(braid);
     }
 
     // capital: a heavy, cushion-like echinus (fuller curve, taller) + abacus (kalathos)
-    // resting on the head, top of abacus == height
-    var abacusH = 0.06 * height, echinusH = 0.065 * height;
+    // resting on the head, top of abacus == height.
+    // Director's r3 review ("flat hat" reading): the echinus curve was too shallow
+    // and the abacus too thin relative to the head below to read as a cushion +
+    // slab rather than a single flat disc — both grown and the echinus profile
+    // given a rounder, more bulbous swell (an extra control point) so the two
+    // parts read as distinct stacked shapes even in silhouette.
+    var abacusH = 0.075 * height, echinusH = 0.085 * height;
     var kalathosTop = height;
     var echinusY = kalathosTop - abacusH - echinusH / 2;
     var echinusProfile = [
-      new THREE.Vector2(headSize * 1.15, 0),
-      new THREE.Vector2(headSize * 1.48, echinusH * 0.32),
-      new THREE.Vector2(headSize * 1.68, echinusH * 0.68),
-      new THREE.Vector2(headSize * 1.62, echinusH)
+      new THREE.Vector2(headSize * 1.18, 0),
+      new THREE.Vector2(headSize * 1.55, echinusH * 0.22),
+      new THREE.Vector2(headSize * 1.88, echinusH * 0.52),
+      new THREE.Vector2(headSize * 1.95, echinusH * 0.76),
+      new THREE.Vector2(headSize * 1.78, echinusH)
     ];
     var echinus = foldedLathe(echinusProfile, {
-      material: mats.marble, seed: seed + 5, span: echinusH, radial: MOBILE ? 12 : 20,
+      material: mats.marble, seed: seed + 5, span: echinusH, radial: MOBILE ? 14 : 24,
       vFold: 0.30, vFoldCount: 12, catAmp: 0, micro: 0
     });
     echinus.position.y = echinusY - echinusH / 2;
     group.add(echinus);
-    var abacus = new THREE.Mesh(new THREE.BoxGeometry(headSize * 3.5, abacusH, headSize * 3.5), mats.marble);
+    var abacus = new THREE.Mesh(new THREE.BoxGeometry(headSize * 3.9, abacusH, headSize * 3.9), mats.marble);
     abacus.position.y = kalathosTop - abacusH / 2;
     abacus.castShadow = true; abacus.receiveShadow = true;
     group.add(abacus);
@@ -5653,7 +5895,21 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // dark blob rather than a clean silhouette. foldScale/leanScale exaggerate the
     // peplos folds and the contrapposto lean so the bronze reads as a shaped figure
     // — not flat color — even under the patina's dark, uneven material.
-    var built = buildStandingBody(height, mat, seed, { weightSide: 1, sash: true, arms: false, foldScale: 2.1, leanScale: 1.3, headTurn: 0 });
+    // Director's r3 review: good silhouette (keep it — bodyBulk: 0 opts out of
+    // the heavier pediment-figure proportions below), wants more drapery fold
+    // relief and a more readable crest — foldScale nudged up (2.1 -> 2.3; a
+    // bigger push here also inflates catAmp, the large-scale swag, and starts
+    // reading as a swollen torso rather than fold relief) — and headBreak
+    // disabled (a civic cult statue keeps her head; the helmet below assumes it).
+    // Director's r1 review (major): at foldScale 2.3 the shared standing-figure
+    // crispMin (0.30, tuned for heavy wool peplos on pediment/caryatid figures)
+    // broke the previously-approved clean silhouette into an overly angular
+    // faceted texture. Dropped to 0.15 for the Promachos alone so folds still
+    // read but stay smooth in silhouette; catAmpBase trimmed 0.09 -> 0.08 too
+    // (director's minor: probe for more fold relief without reintroducing the
+    // torso bloat a bigger catAmp caused at this foldScale — a modest reduction
+    // keeps the swag in the safe range already verified against the reference).
+    var built = buildStandingBody(height, mat, seed, { weightSide: 1, sash: true, arms: false, foldScale: 2.3, leanScale: 1.3, headTurn: 0, headBreak: false, bodyBulk: 0, kneePush: false, crispMin: 0.15, catAmpBase: 0.08 });
     var statue = built.group;
     statue.position.y = plinthH;
     group.add(statue);
@@ -5724,13 +5980,16 @@ window.addFigureHelpers = function (THREE, mats, H) {
     group.add(browBand);
     // crest: a row of adjoining vertical slabs whose tops trace a smooth high arc
     // (nape to brow), reading as one continuous crest from any angle.
-    var crestN = MOBILE ? 7 : 13, crestPeak = helmR * 1.55, crestLen = helmR * 2.5, crestBaseY = helmCenterY + helmR * 0.52;
+    // Director's r3 review: crest read as a low stubby mohawk — raised the peak
+    // (1.55 -> 1.95x helmR) and thickened each fin (0.11 -> 0.14x helmR) for a
+    // bolder, more legible silhouette from a distance.
+    var crestN = MOBILE ? 7 : 13, crestPeak = helmR * 1.95, crestLen = helmR * 2.5, crestBaseY = helmCenterY + helmR * 0.52;
     var crestSlabD = (crestLen / crestN) * 1.2;
     for (var ci = 0; ci < crestN; ci++) {
       var ct = ci / (crestN - 1);
       var archZ = (ct - 0.5) * crestLen;
       var segH = Math.max(helmR * 0.14, crestPeak * Math.pow(sin(ct * PI), 0.65));
-      var fin = new THREE.Mesh(new THREE.BoxGeometry(helmR * 0.11, segH, crestSlabD), mat);
+      var fin = new THREE.Mesh(new THREE.BoxGeometry(helmR * 0.14, segH, crestSlabD), mat);
       fin.position.set(0, crestBaseY + segH / 2, archZ);
       fin.castShadow = true; fin.receiveShadow = true;
       group.add(fin);
