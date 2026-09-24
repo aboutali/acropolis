@@ -1,3 +1,4 @@
 node_modules/
 shots/
 .claude/worktrees/
+_bake_tmp/
