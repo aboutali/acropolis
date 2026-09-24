@@ -190,8 +190,9 @@ window.buildSouthSlope = function (THREE, mats, H) {
   theatreGroup.add(thymele);
 
   // Skene (stage building) with a colonnaded proscaenium facing the orchestra
-  var skeneBack = new THREE.Mesh(new THREE.BoxGeometry(30, 6, 2), mats.marbleWorn);
-  skeneBack.position.set(0, 3, 21.3);
+  // Back wall no taller than the colonnade in front, in darker stone, so it does not read as a blank slab
+  var skeneBack = new THREE.Mesh(new THREE.BoxGeometry(30, 4.2, 2), mats.marbleShadowed);
+  skeneBack.position.set(0, 2.1, 21.3);
   skeneBack.castShadow = true; skeneBack.receiveShadow = true;
   theatreGroup.add(skeneBack);
   var proColumns = [];

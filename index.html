@@ -2557,6 +2557,28 @@ window.buildTerrain = function (THREE, mats, H) {
   }
   var radialSeg = MOBILE ? 70 : 128, ringSeg = MOBILE ? 14 : 24;
   var cliffGeo = ringGeometry(ringSeg, radialSeg, 0);
+  // Carve the two theatre bowls out of the hillside (same bowls as 08-southslope.js carves in its
+  // rock apron); otherwise the slope buries the middle of the seating
+  (function () {
+    var bowls = [
+      { x: -6, y: -55, z: 124, r0: 22, dr: 1.05, dy: 0.6, rows: 24, sw: 19, sd: 23 },
+      { x: -140, y: -52, z: 101, r0: 14, dr: 1.33, dy: 0.8, rows: 18, sw: 40, sd: 25 }
+    ];
+    var p = cliffGeo.attributes.position;
+    for (var i = 0; i < p.count; i++) {
+      var wx = p.getX(i), wz = p.getZ(i), f = Infinity;
+      for (var b = 0; b < bowls.length; b++) {
+        var o = bowls[b], dx = wx - o.x, dz = wz - o.z, d = Math.sqrt(dx * dx + dz * dz);
+        var rMax = o.r0 + o.rows * o.dr, top = o.y + o.rows * o.dy;
+        if (dz <= 0.2 * d && d < rMax + 12) {
+          f = Math.min(f, (d < o.r0 ? o.y : d < rMax ? o.y + ((d - o.r0) / o.dr) * o.dy : top + (d - rMax) * 0.9) - 1.0);
+        } else if (dz > 0 && Math.abs(dx) < o.sw && dz < o.sd) f = Math.min(f, o.y - 1.0);
+      }
+      if (p.getY(i) > f) p.setY(i, f);
+    }
+    p.needsUpdate = true;
+    cliffGeo.computeVertexNormals();
+  })();
   paintVertexColors(cliffGeo, 900, true);
   // A larger uvScale than the material's native tiling spreads the baked stone texture into
   // broad soft bands instead of a tight regular grid, so the strata read as bedding planes
@@ -2690,10 +2712,18 @@ window.buildTerrain = function (THREE, mats, H) {
       scrubT.push({ p: [jx, sy + 0.32 * ssc, jz], r: [0, hillR() * PI * 2, 0], s: [ssc * scx, ssc * (0.55 + hillR() * 0.3), ssc * scz] });
     }
   }
-  group.add(H.instance(trunkGeo, mats.trunk, pineTrunkT));
-  group.add(H.instance(pineGeo, mats.foliageOlive, pineCanopyT));
+  // Hillside scatter must stay out of the two carved theatre bowls (seating plus stage apron)
+  function outOfBowls(list) {
+    return list.filter(function (t) {
+      var x = t.p[0], z = t.p[2];
+      var d1 = Math.hypot(x + 6, z - 124), d2 = Math.hypot(x + 140, z - 101);
+      return d1 > 50 && d2 > 42;
+    });
+  }
+  group.add(H.instance(trunkGeo, mats.trunk, outOfBowls(pineTrunkT)));
+  group.add(H.instance(pineGeo, mats.foliageOlive, outOfBowls(pineCanopyT)));
   group.add(H.instance(pineGeo2, mats.foliageOlive, pineCanopy2T));
-  group.add(H.instance(scrubGeo, mats.scrub, scrubT));
+  group.add(H.instance(scrubGeo, mats.scrub, outOfBowls(scrubT)));
 
   var taluR = lcg(271);
   function warmBrighten(baseMat, dr, dg, db) {
@@ -2717,7 +2747,7 @@ window.buildTerrain = function (THREE, mats, H) {
     var bsc = 2.0 + taluR() * 3.5;
     boulderT.push({ p: [bx, by + bsc * 0.35, bz], r: [taluR() * PI, taluR() * PI, taluR() * PI], s: [bsc, bsc * (0.7 + taluR() * 0.4), bsc * (0.85 + taluR() * 0.3)] });
   }
-  group.add(H.instance(boulderGeo, taluBoulderMat, boulderT));
+  group.add(H.instance(boulderGeo, taluBoulderMat, outOfBowls(boulderT)));
   // Octahedron (8 tris, well under half the previous icosahedron's cost) lets the rubble spray
   // grow denser at the cliff base -- a real scree field is mostly count, not per-chip roundness.
   var rubbleGeo = new THREE.OctahedronGeometry(0.34, 0);
@@ -2738,7 +2768,7 @@ window.buildTerrain = function (THREE, mats, H) {
     var rsc = (0.45 + taluR() * 1.05) * sizeLOD;
     rubbleT.push({ p: [rx, ry + rsc * 0.2, rz], r: [taluR() * PI, taluR() * PI, taluR() * PI], s: [rsc, rsc * 0.8, rsc] });
   }
-  group.add(H.instance(rubbleGeo, taluRubbleMat, rubbleT));
+  group.add(H.instance(rubbleGeo, taluRubbleMat, outOfBowls(rubbleT)));
 
   // ---------------- 4. City of Athens: dense whitewashed houses fading into the haze ----------------
   // A street grid rotated a few degrees off the world axes (like the real Plaka), with periodic
@@ -4255,8 +4285,9 @@ window.buildSouthSlope = function (THREE, mats, H) {
   theatreGroup.add(thymele);
 
   // Skene (stage building) with a colonnaded proscaenium facing the orchestra
-  var skeneBack = new THREE.Mesh(new THREE.BoxGeometry(30, 6, 2), mats.marbleWorn);
-  skeneBack.position.set(0, 3, 21.3);
+  // Back wall no taller than the colonnade in front, in darker stone, so it does not read as a blank slab
+  var skeneBack = new THREE.Mesh(new THREE.BoxGeometry(30, 4.2, 2), mats.marbleShadowed);
+  skeneBack.position.set(0, 2.1, 21.3);
   skeneBack.castShadow = true; skeneBack.receiveShadow = true;
   theatreGroup.add(skeneBack);
   var proColumns = [];
