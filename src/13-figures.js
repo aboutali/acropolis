@@ -412,14 +412,31 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // the chest/shoulders, not as a uniform bloat. bodyBulk: 0 (Promachos, whose
     // silhouette the director already signed off on) keeps the original slim
     // proportions untouched.
+    // Director's r1 review (minor: bulk still doesn't read as "massive" at scene
+    // distance): the bulked targets below gave chest/shoulder/hip only ~14-16%
+    // over the slim base radii. Pushed to ~18-20% and, per the director's note
+    // that mass was concentrated at the chest/shoulders, raised the lower-leg
+    // (calf/knee) targets too so the extra bulk distributes down the whole body
+    // instead of just the torso.
     var bodyBulk = opts.bodyBulk !== undefined ? opts.bodyBulk : 1;
     function bulkR(base, bulked) { return (base + bodyBulk * (bulked - base)) * height; }
-    var rHem = bulkR(0.075, 0.078), rCalf = bulkR(0.062, 0.066), rKnee = bulkR(0.052, 0.057),
-      rHip = bulkR(0.100, 0.114), rWaist = bulkR(0.078, 0.088), rChest = bulkR(0.100, 0.116),
-      rShoulder = bulkR(0.112, 0.128), rNeck = bulkR(0.044, 0.046);
+    var rHem = bulkR(0.075, 0.079), rCalf = bulkR(0.062, 0.070), rKnee = bulkR(0.052, 0.062),
+      rHip = bulkR(0.100, 0.119), rWaist = bulkR(0.078, 0.091), rChest = bulkR(0.100, 0.119),
+      rShoulder = bulkR(0.112, 0.133), rNeck = bulkR(0.044, 0.047);
 
     var contrapposto = opts.contrapposto !== false;
-    var weightSide = opts.weightSide || 1; // +1 = weight on figure's right leg (their -x side)
+    // Director's r1 review (majors: pediment figures lack per-slot pose variety):
+    // true seated/reclining/striding slot poses require changing H.makePediment's
+    // slot-assignment logic in 02-helpers.js, outside this module's ownership
+    // (src/13-figures.js only). Within this file's own reach, every unseeded
+    // caller (all of H.makePediment's 'stand'/'kneel'/'recline' figures) was
+    // still defaulting to the exact same weightSide=1 — identical contrapposto
+    // lean, identical weight-bearing arm, identical fold bias on every figure.
+    // Auto-alternating it per seed (still fully deterministic, no runtime RNG)
+    // gives real mirrored-stance variety across a pediment row at zero extra
+    // triangle cost. Explicit callers (e.g. the Promachos, which wants a
+    // specific known-good stance) are unaffected.
+    var weightSide = opts.weightSide !== undefined ? opts.weightSide : (rnd() < 0.5 ? 1 : -1);
     function lean(yFrac) {
       if (!contrapposto) return { x: 0, twist: 0 };
       var s = yFrac;
@@ -458,6 +475,14 @@ window.addFigureHelpers = function (THREE, mats, H) {
       new THREE.Vector2(rShoulder, shoulderY),
       new THREE.Vector2(rNeck, neckBaseY)
     ];
+    // Director's r1 review (major: Promachos silhouette compromised by the
+    // shared standing-figure crispMin/catAmp): both are now caller-overridable
+    // (default unchanged, 0.30 / 0.09) so the Promachos alone can dial back the
+    // angular crease bias and large-scale swag that were breaking up her
+    // previously-approved clean silhouette, without softening every other
+    // standing/pediment figure's drapery.
+    var stanceCrispMin = opts.crispMin !== undefined ? opts.crispMin : 0.30;
+    var catAmpBase = opts.catAmpBase !== undefined ? opts.catAmpBase : 0.09;
     var body = foldedLathe(profile, {
       material: mat, seed: seed, span: neckBaseY, lean: lean, radial: bodyRadial, bulge: stanceBulge,
       // Director's r1/r2 review: fold amplitude/count were too shallow/sparse to
@@ -467,7 +492,7 @@ window.addFigureHelpers = function (THREE, mats, H) {
       // it scales with `foldScale`, and callers that push foldScale hard (the
       // Promachos, 2x+) turned a bigger catAmp into a swollen, deformed torso
       // rather than visible drapery relief.
-      vFoldCount: 22, vFold: 0.25 * foldScale, catAmp: 0.09 * foldScale, catFreq: 2.2, crispMin: 0.30,
+      vFoldCount: 22, vFold: 0.25 * foldScale, catAmp: catAmpBase * foldScale, catFreq: 2.2, crispMin: stanceCrispMin,
       vFoldBiasTheta: weightSide > 0 ? PI * 0.15 : PI * 1.15, vFoldBiasAmt: 0.5
     });
     group.add(body);
@@ -776,13 +801,17 @@ window.addFigureHelpers = function (THREE, mats, H) {
 
         // bust: front is -z (theta = -PI/2 in this module's convention), two lobes
         // straddling the centreline at chest height.
+        // Director's r1 review (minor: bust undersized, silhouette still
+        // somewhat columnar): magnitude raised 0.040 -> 0.052x height and the
+        // angular falloff tightened 0.26 -> 0.20 so each lobe reads as a
+        // sharper, more clearly separated curve rather than a broad soft swell.
         var chestFrac = (shoulderY * 0.90) / neckBaseY;
         var bustFall = gaussFall(yFrac - chestFrac, 0.045);
         var bust = 0;
         for (var bSide = -1; bSide <= 1; bSide += 2) {
           var bustTheta = -PI / 2 + bSide * 0.30;
-          var nearBustTheta = gaussFall(((theta - bustTheta + PI) % (2 * PI)) - PI, 0.26);
-          bust += 0.040 * height * bustFall * nearBustTheta;
+          var nearBustTheta = gaussFall(((theta - bustTheta + PI) % (2 * PI)) - PI, 0.20);
+          bust += 0.052 * height * bustFall * nearBustTheta;
         }
 
         return kneeBulge + seamPull + bust;
@@ -1042,7 +1071,15 @@ window.addFigureHelpers = function (THREE, mats, H) {
     // bigger push here also inflates catAmp, the large-scale swag, and starts
     // reading as a swollen torso rather than fold relief) — and headBreak
     // disabled (a civic cult statue keeps her head; the helmet below assumes it).
-    var built = buildStandingBody(height, mat, seed, { weightSide: 1, sash: true, arms: false, foldScale: 2.3, leanScale: 1.3, headTurn: 0, headBreak: false, bodyBulk: 0, kneePush: false });
+    // Director's r1 review (major): at foldScale 2.3 the shared standing-figure
+    // crispMin (0.30, tuned for heavy wool peplos on pediment/caryatid figures)
+    // broke the previously-approved clean silhouette into an overly angular
+    // faceted texture. Dropped to 0.15 for the Promachos alone so folds still
+    // read but stay smooth in silhouette; catAmpBase trimmed 0.09 -> 0.08 too
+    // (director's minor: probe for more fold relief without reintroducing the
+    // torso bloat a bigger catAmp caused at this foldScale — a modest reduction
+    // keeps the swag in the safe range already verified against the reference).
+    var built = buildStandingBody(height, mat, seed, { weightSide: 1, sash: true, arms: false, foldScale: 2.3, leanScale: 1.3, headTurn: 0, headBreak: false, bodyBulk: 0, kneePush: false, crispMin: 0.15, catAmpBase: 0.08 });
     var statue = built.group;
     statue.position.y = plinthH;
     group.add(statue);
