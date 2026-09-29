@@ -611,43 +611,110 @@ window.buildMats = function (THREE) {
     mats.ivory = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: t.map, roughnessMap: t.rm });
   })();
 
-  // Plaster + city share a whitewash field; city adds dirt streaks + window-shadow flecks.
-  (function () {
-    var res = GEN_S, plasterC = new Uint8ClampedArray(res * res * 4), cityC = new Uint8ClampedArray(res * res * 4);
-    var plasterRM = new Uint8ClampedArray(res * res * 4), cityRM = new Uint8ClampedArray(res * res * 4);
-    var base = [231, 222, 201], patch = [214, 204, 180], dirt = [156, 147, 124], blotchCol = [202, 191, 165];
-    var x, y;
-    for (y = 0; y < res; y++) {
-      var v = (y + 0.5) / res;
-      for (x = 0; x < res; x++) {
-        var u = (x + 0.5) / res, i = y * res + x, di = i * 4;
-        var n = warpTile(u, v, 8801, 7, 7, 7, 0.5, 0.4);              // grain octaves 4 -> 7
-        // Coarse aging blotches: a large, low-octave fbm field so weathering reads as big
-        // uneven patches of the wall, not a uniform speckle.
-        var blotchN = fbmTile(u, v, 8850, 3, 3, 3, 0.5);
-        // r2: raise the threshold (was 0.42-0.78) to shrink blotch coverage, and fragment the
-        // remaining patches with a higher-frequency secondary field so aging reads as varied
-        // small weathering rather than a few monolithic stains.
-        var blotchDetail = fbmTile(u, v, 8870, 6, 6, 3, 0.5);
-        var blotchMask = smooth(0.5, 0.75, blotchN) * (0.7 + 0.3 * blotchDetail);
-        var c = lerpC(base, patch, n * 0.4);
-        c = lerpC(c, blotchCol, blotchMask * 0.28);
-        plasterC[di] = byte(c[0]); plasterC[di + 1] = byte(c[1]); plasterC[di + 2] = byte(c[2]); plasterC[di + 3] = 255;
-        plasterRM[di] = 255; plasterRM[di + 1] = byte(clamp01(0.82 + (n - 0.5) * 0.14 + blotchMask * 0.12) * 255); plasterRM[di + 2] = 0; plasterRM[di + 3] = 255;
-
-        var streak = warpTile(u, v * 0.4, 8901, 3, 9, 4, 0.5, 0.25);
-        var grime = smooth(0.5, 0.85, streak) * 0.35;
-        var cc = lerpC(c, dirt, grime);
-        cityC[di] = byte(cc[0]); cityC[di + 1] = byte(cc[1]); cityC[di + 2] = byte(cc[2]); cityC[di + 3] = 255;
-        cityRM[di] = 255; cityRM[di + 1] = byte(clamp01(0.85 + grime * 0.1 + blotchMask * 0.1) * 255); cityRM[di + 2] = 0; cityRM[di + 3] = 255;
+  // City facades: procedural one-storey tile (7 m bay x 2.9 m storey, 256px) with a balcony
+  // slab band at the floor line, a dark two-window row and railing, tinted per instance
+  // (setColorAt) by 03-terrain. The instanced-city UVs are computed in the vertex shader from
+  // each instance's own scale (bays/storeys snapped to whole numbers so windows meet corners),
+  // because finishScene's box-projection sees scale 1 on shared unit instance geometry.
+  // mats.city = polykatoikia (grey-white, balconies), mats.plaster = old low houses (warm, shutters).
+  // city.userData.roofMat = flat concrete roofs (no windows), .asphaltMat = street floor, .clutterMat = rooftop clutter.
+  function facadeCanvas(kind) {
+    var S = 256, c = newCanvas(S), g = c.getContext('2d'), i, k;
+    var old = kind === 'old';
+    g.fillStyle = old ? '#ebdfc7' : '#dcd9d1'; g.fillRect(0, 0, S, S);
+    // soft vertical staining
+    for (i = 0; i < 26; i++) {
+      var sx = fastHash(i, 1, 3301 + (old ? 9 : 0)) * S, sw = 4 + fastHash(i, 2, 3302) * 16;
+      g.fillStyle = 'rgba(120,110,95,' + (0.03 + fastHash(i, 3, 3303) * 0.05).toFixed(3) + ')';
+      g.fillRect(sx, 0, sw, S);
+    }
+    var wins = old ? [0.3, 0.72] : [0.26, 0.74], ww = old ? 40 : 58;
+    for (k = 0; k < wins.length; k++) {
+      var cx = wins[k] * S, top = old ? 62 : 70, hh = old ? 118 : 100;
+      // shadow reveal + dark glass
+      g.fillStyle = 'rgba(70,64,56,0.35)'; g.fillRect(cx - ww / 2 - 3, top - 3, ww + 6, hh + 5);
+      var gr = g.createLinearGradient(0, top, 0, top + hh);
+      gr.addColorStop(0, '#3c4550'); gr.addColorStop(1, '#1f252c');
+      g.fillStyle = gr; g.fillRect(cx - ww / 2, top, ww, hh);
+      if (old) {
+        // wooden shutters on both windows
+        g.fillStyle = k ? '#6d5a3c' : '#55683f';
+        g.fillRect(cx - ww / 2 - 13, top, 12, hh); g.fillRect(cx + ww / 2 + 1, top, 12, hh);
+        g.fillStyle = '#d8ccb2'; g.fillRect(cx - ww / 2 - 4, top + hh, ww + 8, 5);
+      } else {
+        g.fillStyle = 'rgba(220,224,226,0.55)'; g.fillRect(cx - 1.5, top, 3, hh); // mullion
+        if (k === 0) { g.fillStyle = 'rgba(200,196,186,0.9)'; g.fillRect(cx - ww / 2, top, ww, 30); } // roller blind
       }
     }
-    var plasterCanvas = arrToCanvas(plasterC, res), cityCanvas = arrToCanvas(cityC, res);
-    addFineGrain(plasterCanvas, 0.028, 8802);
-    addFineGrain(cityCanvas, 0.032, 8902);
-    mats.plaster = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: toTexture(upscale(plasterCanvas, SIZE), true), roughnessMap: toTexture(upscale(arrToCanvas(plasterRM, res), SIZE), false) });
-    mats.city = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, map: toTexture(upscale(cityCanvas, SIZE), true), roughnessMap: toTexture(upscale(arrToCanvas(cityRM, res), SIZE), false) });
-    addGroundGrime(mats.plaster); addGroundGrime(mats.city);
+    if (!old) {
+      // balcony slab (floor line = tile bottom) + underside shadow + railing band
+      g.fillStyle = '#f4f2ec'; g.fillRect(0, S - 20, S, 20);
+      g.fillStyle = 'rgba(60,55,48,0.32)'; g.fillRect(0, S - 30, S, 10);
+      g.fillStyle = 'rgba(38,40,42,0.55)'; g.fillRect(0, S - 62, S, 3);
+      for (i = 0; i < 32; i++) g.fillRect(i * 8 + 2, S - 60, 2, 40);
+      g.fillStyle = 'rgba(38,40,42,0.35)'; g.fillRect(0, S - 26, S, 3);
+    } else {
+      g.fillStyle = 'rgba(90,80,64,0.35)'; g.fillRect(0, S - 6, S, 6);
+    }
+    addFineGrain(c, 0.04, old ? 3399 : 3398);
+    return c;
+  }
+  function flatCanvas(base, spread, seed) {
+    var S = 128, c = newCanvas(S), g = c.getContext('2d'), i;
+    g.fillStyle = base; g.fillRect(0, 0, S, S);
+    for (i = 0; i < 40; i++) {
+      var v = fastHash(i, 5, seed);
+      g.fillStyle = 'rgba(' + (v < 0.5 ? '255,255,255' : '0,0,0') + ',' + (spread * (0.4 + fastHash(i, 6, seed))).toFixed(3) + ')';
+      g.fillRect(fastHash(i, 7, seed) * S, fastHash(i, 8, seed) * S, 8 + v * 30, 8 + fastHash(i, 9, seed) * 30);
+    }
+    addFineGrain(c, 0.06, seed + 1);
+    return c;
+  }
+  function instUV(mat, code, key) {
+    var prev = mat.onBeforeCompile;
+    mat.onBeforeCompile = function (shader) {
+      if (prev) prev(shader);
+      shader.vertexShader = shader.vertexShader.replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_INSTANCING\n' + code + '\n#endif');
+    };
+    mat.customProgramCacheKey = function () { return key; };
+  }
+  var FACADE_UV = [
+    'vec3 iS = vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz));',
+    'vec3 pS = position * iS;',
+    'bool alongX = abs(normal.x) > abs(normal.z);',
+    'float fw = alongX ? iS.z : iS.x;',
+    'float fu = alongX ? pS.z : pS.x;',
+    'float nb = max(1.0, floor(fw / 7.0 + 0.5));',
+    'float nf = max(1.0, floor(iS.y / 2.9 + 0.5));',
+    'vUv = vec2((fu / fw + 0.5) * nb, (position.y + 0.5) * nf);'
+  ].join('\n');
+  (function () {
+    function facadeMat(tex) {
+      var m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.93, metalness: 0, map: tex });
+      addGroundGrime(m); instUV(m, FACADE_UV, 'facade-inst');
+      return m;
+    }
+    mats.city = facadeMat(toTexture(facadeCanvas('block'), true));
+    mats.plaster = facadeMat(toTexture(facadeCanvas('old'), true));
+    var rt = toTexture(flatCanvas('#b4b4b0', 0.08, 4410), true);
+    var roofConc = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0, map: rt });
+    instUV(roofConc, 'vec3 iR = vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz));\nvUv = position.xz * iR.xz / 5.0;', 'roof-inst');
+    var at = toTexture(flatCanvas('#2a2e34', 0.05, 4420), true);
+    at.repeat.set(220, 220);
+    var asphalt = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.96, metalness: 0, map: at, transparent: true, depthWrite: false });
+    asphalt.userData.keepUV = true;
+    asphalt.onBeforeCompile = function (shader) {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vAsW;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvAsW = (modelMatrix * vec4(position, 1.0)).xz;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vAsW;')
+        .replace('#include <dithering_fragment>', '#include <dithering_fragment>\ngl_FragColor.a *= 1.0 - smoothstep(1050.0, 1400.0, length(vAsW - vec2(-45.0, 0.0)));');
+    };
+    asphalt.customProgramCacheKey = function () { return 'asphalt-fade'; };
+    // Extra city materials ride on mats.city.userData (03-terrain reads them from there).
+    mats.city.userData.roofMat = roofConc; mats.city.userData.asphaltMat = asphalt;
+    mats.city.userData.clutterMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75, metalness: 0.05 });
   })();
 
   // Dry vegetation: grass (ground cover) and scrub (foliage-adjacent, drier/greyer) share a field.
@@ -716,9 +783,9 @@ window.buildMats = function (THREE) {
   // architecture" issue called out as out of scope; this only fixes which crop gets shown.)
   var UV_SCALE = {
     marble: 1.3, marbleWorn: 1.3, marbleShadowed: 1.4, marbleStatue: 0.9, marbleRelief: 1.3,
-    rock: 8, rockDark: 9, ground: 5, city: 4, terracotta: 1.4,
+    rock: 8, rockDark: 9, ground: 5, city: 7, terracotta: 1.4,
     bronze: 2, bronzePatina: 2, foliageOlive: 3, foliageCypress: 3, trunk: 1.1,
-    gold: 1, ivory: 1.4, grass: 6, scrub: 4, plaster: 3,
+    gold: 1, ivory: 1.4, grass: 6, scrub: 4, plaster: 7,
   };
   for (var key in UV_SCALE) { if (mats[key]) mats[key].userData.uvScale = UV_SCALE[key]; }
 
@@ -726,7 +793,7 @@ window.buildMats = function (THREE) {
   // stay vertical, so it's excluded) get a small random per-mesh UV-axis rotation in
   // finishScene, so a repeated ground/rock/masonry tile doesn't line up with the world/view
   // axes and read as an obvious grid.
-  var UV_ROTATE = { rock: 1, rockDark: 1, ground: 1, city: 1, terracotta: 1, plaster: 1, grass: 1, scrub: 1 };
+  var UV_ROTATE = { rock: 1, rockDark: 1, ground: 1, terracotta: 1, grass: 1, scrub: 1 };
   for (var rkey in UV_ROTATE) { if (mats[rkey]) mats[rkey].userData.uvRotate = true; }
 
   // ---------------------------------------------------------------
@@ -798,7 +865,6 @@ window.buildMats = function (THREE) {
     apply([mats.terracotta], 'map', 'assets/tex/terracotta_col.jpg', [1.05, 0.78, 0.62]);
     apply([mats.terracotta], 'normalMap', 'assets/tex/terracotta_nor.jpg');
     apply([mats.terracotta], 'roughnessMap', 'assets/tex/terracotta_rough.jpg');
-    set([mats.plaster], 'plaster');
     // mats.bronze/bronzePatina, mats.city and the vegetation/gold/ivory materials have no
     // strong CC0 match worth the download budget; they keep their procedural look.
   }

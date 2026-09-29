@@ -349,6 +349,8 @@ window.buildTerrain = function (THREE, mats, H) {
       for (var b = 0; b < bowls.length; b++) {
         var o = bowls[b], dx = wx - o.x, dz = wz - o.z, d = Math.sqrt(dx * dx + dz * dz);
         var rMax = o.r0 + o.rows * o.dr, top = o.y + o.rows * o.dy;
+        // Only vertices below the bowl's rim: higher ones belong to the cliff band and must stay
+        if (p.getY(i) > top + 6) continue;
         if (dz <= 0.2 * d && d < rMax + 12) {
           f = Math.min(f, (d < o.r0 ? o.y : d < rMax ? o.y + ((d - o.r0) / o.dr) * o.dy : top + (d - rMax) * 0.9) - 1.0);
         } else if (dz > 0 && Math.abs(dx) < o.sw && dz < o.sd) f = Math.min(f, o.y - 1.0);
@@ -374,7 +376,7 @@ window.buildTerrain = function (THREE, mats, H) {
   // wide shots reads as real countryside instead of one flat uniform beige sheet. The undulation
   // is held at zero out to well past the city's own footprint (maxR below) and only grows beyond
   // that, so no modelled building/tree ever floats or sinks relative to its own "flat -80" ground.
-  var groundSeg = MOBILE ? 44 : 90;
+  var groundSeg = MOBILE ? 44 : 64;
   var groundGeo = new THREE.PlaneGeometry(16000, 16000, groundSeg, groundSeg);
   groundGeo.rotateX(-PI / 2);
   function mixC(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
@@ -446,7 +448,7 @@ window.buildTerrain = function (THREE, mats, H) {
   var trunkGeo = new THREE.CylinderGeometry(0.14, 0.22, 2.6, 5);
   var pineGeo = new THREE.IcosahedronGeometry(1.7, 0);
   var pineGeo2 = new THREE.IcosahedronGeometry(1.15, 0); // smaller secondary lobe, stacked offset
-  var scrubGeo = new THREE.IcosahedronGeometry(0.6, 0);
+  var scrubGeo = new THREE.OctahedronGeometry(0.62, 0); // 8 tris (was 20): ~1200 instances
   var pineTrunkT = [], pineCanopyT = [], pineCanopy2T = [], scrubT = [];
   // t is capped well short of 1 (unlike the boulder/rubble talus spray below, which fades out
   // anyway): at the higher counts here, even the previous build's occasional stragglers that
@@ -502,7 +504,7 @@ window.buildTerrain = function (THREE, mats, H) {
   group.add(H.instance(trunkGeo, mats.trunk, outOfBowls(pineTrunkT)));
   group.add(H.instance(pineGeo, mats.foliageOlive, outOfBowls(pineCanopyT)));
   group.add(H.instance(pineGeo2, mats.foliageOlive, pineCanopy2T));
-  group.add(H.instance(scrubGeo, mats.scrub, outOfBowls(scrubT)));
+  var scrubMesh = H.instance(scrubGeo, mats.scrub, outOfBowls(scrubT)); scrubMesh.castShadow = false; group.add(scrubMesh);
 
   var taluR = lcg(271);
   function warmBrighten(baseMat, dr, dg, db) {
@@ -566,8 +568,7 @@ window.buildTerrain = function (THREE, mats, H) {
     var a = radius * Math.SQRT1_2;
     var C0 = [a, 0, a], C1 = [-a, 0, a], C2 = [-a, 0, -a], C3 = [a, 0, -a], apex = [0, height, 0];
     var tris = [
-      apex, C1, C0, apex, C2, C1, apex, C3, C2, apex, C0, C3, // 4 sloped sides
-      C0, C1, C2, C0, C2, C3 // base cap (2 tris)
+      apex, C1, C0, apex, C2, C1, apex, C3, C2, apex, C0, C3 // 4 sloped sides (base cap dropped: hidden)
     ];
     var verts = new Float32Array(tris.length * 3);
     for (var vi = 0; vi < tris.length; vi++) { verts[vi * 3] = tris[vi][0]; verts[vi * 3 + 1] = tris[vi][1]; verts[vi * 3 + 2] = tris[vi][2]; }
@@ -596,8 +597,7 @@ window.buildTerrain = function (THREE, mats, H) {
     var C0 = [a, 0, a], C1 = [-a, 0, a], C2 = [-a, 0, -a], C3 = [a, 0, -a];
     var apex = [a * 0.4, height * 0.5, a * 0.2];
     var tris = [
-      apex, C1, C0, apex, C2, C1, apex, C3, C2, apex, C0, C3,
-      C0, C1, C2, C0, C2, C3
+      apex, C1, C0, apex, C2, C1, apex, C3, C2, apex, C0, C3
     ];
     var verts = new Float32Array(tris.length * 3);
     for (var vi = 0; vi < tris.length; vi++) { verts[vi * 3] = tris[vi][0]; verts[vi * 3 + 1] = tris[vi][1]; verts[vi * 3 + 2] = tris[vi][2]; }
@@ -609,7 +609,71 @@ window.buildTerrain = function (THREE, mats, H) {
   var hipGeo = pyramidRoofGeo(0.82, 0.6);
   var flatGeo = flatRoofGeo(0.82);
   var damagedGeo = damagedRoofGeo(0.82, 0.6);
-  var houseT = [], farT = [], microT = [];
+  // City buildings are split into: walls-only boxes (no top/bottom face: 8 tris) textured with the
+  // procedural facade, and separate flat roof caps (2 tris) in a windowless concrete material.
+  // Near (<400 m) blocks cast shadows; far ones don't (cheaper shadow pass, invisible there anyway).
+  var wallGeo = (function () {
+    var g = new THREE.BoxGeometry(1, 1, 1), idx = g.index.array, keep = [];
+    for (var q = 0; q < idx.length; q++) { var face = (q / 6) | 0; if (face === 2 || face === 3) continue; keep.push(idx[q]); }
+    g.setIndex(keep);
+    return g;
+  })();
+  var roofCapGeo = new THREE.PlaneGeometry(1, 1); roofCapGeo.rotateX(-PI / 2);
+  var wallNearT = [], wallOldT = [], wallFarT = [], capNearT = [], capFarT = [];
+  var tankT = [], hutT = [], solarT = [], poleT = [];
+  var tintR = lcg(913);
+  var BLOCK_TINTS = [[0.98, 0.97, 0.94], [0.97, 0.93, 0.83], [0.88, 0.88, 0.88], [0.94, 0.89, 0.78], [0.80, 0.80, 0.81], [0.93, 0.85, 0.68], [0.90, 0.78, 0.70], [0.97, 0.97, 0.97]];
+  var BLOCK_CUM = [0.24, 0.42, 0.62, 0.78, 0.88, 0.94, 0.97, 1.0];
+  function blockTint() {
+    var r = tintR(), k = 0; while (k < BLOCK_CUM.length - 1 && r > BLOCK_CUM[k]) k++;
+    var v = 0.93 + tintR() * 0.1, c = BLOCK_TINTS[k];
+    return [c[0] * v, c[1] * v, c[2] * v];
+  }
+  function oldTint() { var v = 0.92 + tintR() * 0.1; return [0.98 * v, 0.94 * v, 0.84 * v]; }
+  function roofTint() { var r = tintR(), v = 0.55 + tintR() * 0.35; if (r < 0.12) v = 0.95; else if (r > 0.92) v = 0.35; return [v, v * 0.99, v * 0.96]; }
+  // Plaka: old tiled houses only within ~300 m of the hill centre on the north / north-east side
+  // (north is -z, east is +x in this scene): compass bearing 10..125 degrees.
+  function inPlaka(hx, hz) {
+    var dx = hx + 45, dz = hz, d = Math.sqrt(dx * dx + dz * dz);
+    if (d > 300) return false;
+    var a = Math.atan2(-dz, dx) * 180 / PI;
+    return a > 10 && a < 125;
+  }
+  function rotXZ(ox, oz, yaw) { return [ox * cos(yaw) + oz * sin(yaw), -ox * sin(yaw) + oz * cos(yaw)]; }
+  // One building: walls + roof, plus rooftop clutter on flat-roofed near/mid blocks.
+  function addBuilding(hx, hz, yaw, rr, stories, sx, sz, old, tiled, variant) {
+    var sy = stories * storyH, shadow = rr < 400;
+    var wt = { p: [hx, -80 + sy / 2, hz], r: [0, yaw, 0], s: [sx, sy, sz], c: old ? oldTint() : blockTint() };
+    (old ? wallOldT : shadow ? wallNearT : wallFarT).push(wt);
+    if (tiled) {
+      var rs = (sx + sz) / 2;
+      roofBuckets[variant].push({ p: [hx, -80 + sy + 0.3 * rs * 0.35, hz], r: [0, yaw, 0], s: [rs * 1.05, rs * 0.9, rs * 1.05] });
+      return;
+    }
+    (shadow ? capNearT : capFarT).push({ p: [hx, -80 + sy + 0.02, hz], r: [0, yaw, 0], s: [sx * 1.02, 1, sz * 1.02], c: roofTint() });
+    if (rr < 450 && stories >= 2.5) {
+      var rc = cityR(), o, top = -80 + sy;
+      if (rc < 0.34) { // water tank
+        o = rotXZ((cityR() - 0.5) * sx * 0.6, (cityR() - 0.5) * sz * 0.6, yaw);
+        var ts = 0.8 + cityR() * 0.5;
+        tankT.push({ p: [hx + o[0], top + 0.55 * ts, hz + o[1]], s: [ts, ts, ts], c: cityR() < 0.6 ? [0.92, 0.92, 0.9] : [0.55, 0.57, 0.6] });
+      }
+      if (cityR() < 0.3) { // solar heater: dark tilted panel
+        o = rotXZ((cityR() - 0.5) * sx * 0.6, (cityR() - 0.5) * sz * 0.6, yaw);
+        solarT.push({ p: [hx + o[0], top + 0.55, hz + o[1]], r: [-0.55, yaw, 0], s: [1.8, 0.1, 1.2], c: [0.16, 0.2, 0.28] });
+        tankT.push({ p: [hx + o[0], top + 1.15, hz + o[1] - 0.2 * cos(yaw)], s: [0.7, 0.7, 0.7], c: [0.92, 0.92, 0.9] });
+      }
+      if (cityR() < 0.35 && sx > 6 && sz > 6) { // stair hut
+        o = rotXZ((cityR() < 0.5 ? -1 : 1) * sx * 0.28, (cityR() < 0.5 ? -1 : 1) * sz * 0.28, yaw);
+        hutT.push({ p: [hx + o[0], top + 1.2, hz + o[1]], r: [0, yaw, 0], s: [2.4, 2.4, 2.8], c: blockTint() });
+      }
+      if (rr < 260 && cityR() < 0.3) { // antenna mast
+        o = rotXZ((cityR() - 0.5) * sx * 0.7, (cityR() - 0.5) * sz * 0.7, yaw);
+        poleT.push({ p: [hx + o[0], top + 1.6, hz + o[1]], s: [1, 1, 1], c: [0.35, 0.35, 0.36] });
+      }
+    }
+  }
+  var microT = [];
   // Six roof variants mixing shape (hip/flat/damaged) and colour (hue shifted +-20%, ~1/3 of
   // variants desaturated toward grey-green to read as aged/mossy) so roofs stop reading as one
   // identical geometry+colour repeated everywhere.
@@ -635,15 +699,14 @@ window.buildTerrain = function (THREE, mats, H) {
   // away the way a pointed hip roof does.
   var roofCum = [0.10, 0.18, 0.25, 0.50, 0.80, 1.0];
   function roofVariantAt(hx, hz) {
-    var n = (H.noise2(hx * 0.018, hz * 0.021, 601) * 0.5 + 0.5);
-    for (var vi2 = 0; vi2 < roofCum.length; vi2++) if (n < roofCum[vi2]) return vi2;
-    return roofCum.length - 1;
+    var n = tintR();
+    return n < 0.3 ? 0 : n < 0.6 ? 1 : n < 0.88 ? 2 : 5;
   }
   // Tree clumps and small parks woven into the city fabric.
   var treeTrunkGeo = new THREE.CylinderGeometry(0.12, 0.18, 1.6, 5);
   var treeCanopyGeo = new THREE.IcosahedronGeometry(1.5, 0); // bigger crown -- pure scale, reads at distance
-  var parkGeo = new THREE.BoxGeometry(1, 1, 1);
-  var cityTreeTrunkT = [], cityTreeCanopyT = [], parkT = [];
+  var parkGeo = new THREE.PlaneGeometry(1, 1); parkGeo.rotateX(-PI / 2);
+  var cityTreeTrunkT = [], cityTreeCanopyT = [], cityTreeCanopyFarT = [], parkT = [];
 
   // Real Athens seen from the hills is a dense, continuous carpet of tightly packed blocks with
   // only street-width gaps, not individually-spaced boxes -- lot spacing tightened at every LOD
@@ -721,21 +784,7 @@ window.buildTerrain = function (THREE, mats, H) {
       if (inSouthSlopeApron(hx, hz)) continue; // keep off the theatre/Odeon rock apron
       var yaw = CITY_ROT + ((cix + ciz) % 2 ? PI / 2 : 0) + (cityR() - 0.5) * 0.1; // aligned to the block grid
       if (isStreet) {
-        // Street gap: lay a couple of short worn-stone paving segments along the lane (near+mid
-        // tier only, and only part of the time) instead of leaving it a flat, featureless gap.
-        if (rr < 620 && cityR() < 0.38) {
-          var worldGrid = fromGrid(cix * cell, ciz * cell);
-          var laneYaw = CITY_ROT + (ciz % streetPeriod === 0 ? 0 : PI / 2);
-          // Fixed absolute width (a real 3.6m passage, not a fraction of the block cell -- at
-          // small cells that read as a thin fragment) and near-full cell-length coverage between
-          // the two segments so the lane reads as one continuous thoroughfare, not scattered tiles.
-          var laneW = 3.6, laneLen = cell * 0.9;
-          for (var seg = 0; seg < 2; seg++) {
-            var so = (seg - 0.5) * cell * 0.46;
-            var slx = worldGrid[0] + cos(laneYaw) * so, slz = worldGrid[1] + sin(laneYaw) * so;
-            streetT.push({ p: [-45 + slx, -80 + 0.025, slz], r: [0, laneYaw, 0], s: [laneW, 0.05, laneLen] });
-          }
-        }
+        // Street gap: left empty; the grey asphalt plane shows through as the lane.
         continue;
       }
       // Tree-clump/park odds are higher near the hill and taper with distance, so the city fabric
@@ -747,19 +796,19 @@ window.buildTerrain = function (THREE, mats, H) {
       if (special < treeChance) {
         // Tree clump instead of a house
         var tsc = 0.8 + cityR() * 0.7;
-        cityTreeTrunkT.push({ p: [hx, 0.8 * tsc - 80, hz], s: [tsc, tsc, tsc] });
+        if (rr < 300) cityTreeTrunkT.push({ p: [hx, 0.8 * tsc - 80, hz], s: [tsc, tsc, tsc] });
         for (var lobe = 0; lobe < 3; lobe++) {
           var loA = (lobe / 3) * PI * 2 + cityR();
-          cityTreeCanopyT.push({ p: [hx + cos(loA) * 0.7 * tsc, (1.7 + cityR() * 0.5) * tsc - 80, hz + sin(loA) * 0.7 * tsc], s: [tsc * 0.8, tsc * 0.7, tsc * 0.8] });
+          (rr < 300 ? cityTreeCanopyT : cityTreeCanopyFarT).push({ p: [hx + cos(loA) * 0.7 * tsc, (1.7 + cityR() * 0.5) * tsc - 80, hz + sin(loA) * 0.7 * tsc], s: [tsc * 0.8, tsc * 0.7, tsc * 0.8] });
         }
       } else if (special < treeChance + parkChance) {
         // Small park: a flat green patch with a couple of trees
-        parkT.push({ p: [hx, -80 + 0.03, hz], r: [0, yaw, 0], s: [cell * 0.9, 0.06, cell * 0.9] });
+        parkT.push({ p: [hx, -80 + 0.03, hz], r: [0, yaw, 0], s: [cell * 0.9, 1, cell * 0.9] });
         for (var pt2 = 0; pt2 < 2; pt2++) {
           var pox = hx + (cityR() - 0.5) * cell * 0.6, poz = hz + (cityR() - 0.5) * cell * 0.6;
           var ptsc = 0.7 + cityR() * 0.5;
-          cityTreeTrunkT.push({ p: [pox, 0.8 * ptsc - 80, poz], s: [ptsc, ptsc, ptsc] });
-          cityTreeCanopyT.push({ p: [pox, 1.9 * ptsc - 80, poz], s: [ptsc * 0.8, ptsc * 0.7, ptsc * 0.8] });
+          if (rr < 300) cityTreeTrunkT.push({ p: [pox, 0.8 * ptsc - 80, poz], s: [ptsc, ptsc, ptsc] });
+          (rr < 300 ? cityTreeCanopyT : cityTreeCanopyFarT).push({ p: [pox, 1.9 * ptsc - 80, poz], s: [ptsc * 0.8, ptsc * 0.7, ptsc * 0.8] });
         }
       } else if (rr < 260) {
         // Coarse, spatially-coherent (noise, not per-cell coin-flip) open patches -- small plazas,
@@ -769,38 +818,39 @@ window.buildTerrain = function (THREE, mats, H) {
         // Near tier: real Athens as seen from the hills is mostly 4-7 storey apartment blocks
         // (~8-25m at storyH=2.9), with just a minority of older 1-2 storey houses for variety --
         // was skewed short (40% single-storey), which was a big part of the "sparse boxes" read.
+        var oldH = inPlaka(hx, hz) && cityR() < 0.8;
         var roll1 = cityR(), stories1;
-        if (roll1 < 0.15) stories1 = 1 + cityR() * 1.1;
-        else if (roll1 < 0.55) stories1 = 3 + cityR() * 2.0;
-        else stories1 = 5 + cityR() * 3.2;
-        var sxh = 6 + cityR() * 6, szh = 6 + cityR() * 6, syh = stories1 * storyH;
-        houseT.push({ p: [hx, -80 + syh / 2, hz], r: [0, yaw, 0], s: [sxh, syh, szh] });
-        roofBuckets[roofVariantAt(hx, hz)].push({ p: [hx, -80 + syh + 0.3 * ((sxh + szh) / 2) * 0.35, hz], r: [0, yaw, 0], s: [(sxh + szh) / 2 * 1.05, (sxh + szh) / 2 * 0.9, (sxh + szh) / 2 * 1.05] });
+        if (oldH) stories1 = 1.2 + cityR() * 2.0;
+        else if (roll1 < 0.12) stories1 = 1 + cityR() * 1.1;
+        else if (roll1 < 0.5) stories1 = 3.5 + cityR() * 1.8;
+        else stories1 = 5 + cityR() * 2.6;
+        var sxh = (oldH ? 5 : 8) + cityR() * (oldH ? 5 : 3.5), szh = (oldH ? 5 : 8) + cityR() * (oldH ? 5 : 3.5);
+        addBuilding(hx, hz, yaw, rr, stories1, sxh, szh, oldH, oldH && cityR() < 0.8, roofVariantAt(hx, hz));
       } else if (rr < 620) {
         // Same coarse open-patch mask, sparser than the near tier so the mid tier still reads dense.
         if (H.noise2(hx * 0.014, hz * 0.016, 812) > 0.72) continue;
         // Mid tier: mostly mid-rise (3-6 storeys, ~8.7-17.4m) with a minority of shorter older
         // houses, so the "wall of similar boxes" reads as a real block front, not a height-uniform
         // band distinct from the near tier.
-        var stories2 = cityR() < 0.25 ? 1 + cityR() * 1.3 : 3 + cityR() * 3.0;
-        var sx2 = 6 + cityR() * 11, sz2 = 6 + cityR() * 11, sy2 = stories2 * storyH;
-        houseT.push({ p: [hx, -80 + sy2 / 2, hz], r: [0, yaw, 0], s: [sx2, sy2, sz2] });
-        roofBuckets[roofVariantAt(hx, hz)].push({ p: [hx, -80 + sy2 + 0.3 * ((sx2 + sz2) / 2) * 0.35, hz], r: [0, yaw, 0], s: [(sx2 + sz2) / 2 * 1.05, (sx2 + sz2) / 2 * 0.9, (sx2 + sz2) / 2 * 1.05] });
+        var oldM = inPlaka(hx, hz) && cityR() < 0.7;
+        var stories2 = oldM ? 1.2 + cityR() * 2.0 : cityR() < 0.2 ? 1 + cityR() * 1.3 : 3.5 + cityR() * 3.0;
+        var sx2 = (oldM ? 6 : 11) + cityR() * (oldM ? 8 : 5), sz2 = (oldM ? 6 : 11) + cityR() * (oldM ? 8 : 5);
+        addBuilding(hx, hz, yaw, rr, stories2, sx2, sz2, oldM, oldM && cityR() < 0.75, roofVariantAt(hx, hz));
       } else if (rr < 1150) {
         // Far tier now fades from fully-occupied at 620m down to the intermediate ~55% density by
         // 1150m (a gradient, not a flat 100%-filled band butting against the outer ring).
         if (cityR() > occupancyAt(rr)) continue;
         // Far tier's own block reads as most of the city's screen area in the wide hill shots, so
         // it gets the same height variety as the nearer tiers (cheap: still one bare box, no roof).
-        var stories3 = cityR() < 0.2 ? 1 + cityR() * 1.3 : 2.5 + cityR() * 3.2;
-        var sx3 = 6 + cityR() * 14, sz3 = 6 + cityR() * 14, sy3 = stories3 * storyH;
-        farT.push({ p: [hx, -80 + sy3 / 2, hz], r: [0, yaw, 0], s: [sx3, sy3, sz3] });
+        var stories3 = cityR() < 0.12 ? 1.5 + cityR() * 1.5 : 4.5 + cityR() * 3.5;
+        var sx3 = 20 + cityR() * 20, sz3 = 20 + cityR() * 20, sy3 = stories3 * storyH;
+        addBuilding(hx, hz, yaw, rr, stories3, sx3, sz3, false, false, 0);
       } else {
         // Tapered outer ring (1150-1350m): occupancy keeps fading (from ~75% down to ~55%) on the
         // same curve as the far tier above, instead of a separate hard coin-flip threshold.
         if (cityR() > occupancyAt(rr)) continue;
         var sx4 = 3 + cityR() * 5, sz4 = 3 + cityR() * 5, sy4 = (1.2 + cityR() * 2.2) * storyH;
-        microT.push({ p: [hx, -80 + sy4 / 2, hz], r: [0, yaw, 0], s: [sx4, sy4, sz4] });
+        addBuilding(hx, hz, yaw, rr, sy4 / storyH, sx4, sz4, false, false, 0);
       }
     }
     rr += cell;
@@ -819,8 +869,8 @@ window.buildTerrain = function (THREE, mats, H) {
   // of disappearing to sub-pixel specks between the rooftops.
   // Rounded canopies: octahedrons read as green crystals from a distance
   var forestCanopyGeo = new THREE.IcosahedronGeometry(2.3, 0);
-  var forestTrunkGeo = new THREE.CylinderGeometry(0.16, 0.24, 2.4, 5);
-  var forestTrunkT = [], forestOliveT = [], forestCypressT = [];
+  var forestOliveT = [], forestCypressT = [], forestOliveFarT = [], forestCypressFarT = [];
+  var forestCanopyFarGeo = new THREE.OctahedronGeometry(2.6, 0); // 8 tris for the far crowns
   var forestCount = MOBILE ? 150 : 430;
   for (var fo = 0; fo < forestCount; fo++) {
     var fa = forestR() * PI * 2;
@@ -830,31 +880,95 @@ window.buildTerrain = function (THREE, mats, H) {
     var fhx = -45 + cos(fa) * fr, fhz = sin(fa) * fr;
     if (ellipseE(fhx, fhz) < 1) continue; // keep off the hill itself
     var fsc = 0.85 + forestR() * 0.95;
-    forestTrunkT.push({ p: [fhx, -80 + 0.7 * fsc, fhz], s: [fsc, fsc, fsc] });
     var fCanopy = { p: [fhx, -80 + 1.6 * fsc, fhz], r: [0, forestR() * PI * 2, 0], s: [fsc, fsc * (0.85 + forestR() * 0.3), fsc] };
-    if (forestR() < 0.6) forestOliveT.push(fCanopy); else forestCypressT.push(fCanopy);
+    var fFar = fr > 300;
+    if (forestR() < 0.6) (fFar ? forestOliveFarT : forestOliveT).push(fCanopy); else (fFar ? forestCypressFarT : forestCypressT).push(fCanopy);
   }
 
   var cityGroup = new THREE.Group();
-  cityGroup.add(H.instance(bodyGeo, mats.plaster, houseT));
+  // Instanced mesh with optional per-instance colour (t.c) and shadow flag; keepUV: the city
+  // materials compute their own world-scale UVs in-shader (see the mats module), finishScene must not.
+  // The list is split into ~48 polar chunks (16 sectors x 3 distance bands) and each chunk gets its
+  // own InstancedMesh with a cloned geometry whose boundingSphere encloses just that chunk, so
+  // three's frustum culling drops off-screen chunks in the main, shadow and SSAO passes (a single
+  // InstancedMesh is culled by its unit geometry's sphere and is effectively always drawn).
+  function cityInst(geo, mat, list, shadow, target) {
+    target = target || cityGroup;
+    if (!geo.boundingSphere) geo.computeBoundingSphere();
+    var gr = geo.boundingSphere.radius, cells = {}, k;
+    for (var li = 0; li < list.length; li++) {
+      var e = list[li], dx = e.p[0] + 45, dz = e.p[2], d = Math.sqrt(dx * dx + dz * dz);
+      var key = (Math.floor((Math.atan2(dz, dx) / (PI * 2) + 0.5) * 16) % 16) + '/' + (d < 300 ? 0 : d < 620 ? 1 : 2);
+      (cells[key] || (cells[key] = [])).push(e);
+    }
+    for (k in cells) {
+      var sub = cells[k], cx = 0, cy = 0, cz = 0, si, ms = 0;
+      for (si = 0; si < sub.length; si++) { cx += sub[si].p[0]; cy += sub[si].p[1]; cz += sub[si].p[2]; }
+      cx /= sub.length; cy /= sub.length; cz /= sub.length;
+      var rad = 0;
+      for (si = 0; si < sub.length; si++) {
+        var q = sub[si], s = q.s || [1, 1, 1], sm = Math.max(s[0], s[1], s[2]);
+        var dd = Math.sqrt((q.p[0] - cx) * (q.p[0] - cx) + (q.p[1] - cy) * (q.p[1] - cy) + (q.p[2] - cz) * (q.p[2] - cz)) + gr * sm;
+        if (dd > rad) rad = dd;
+      }
+      var g2 = geo.clone();
+      g2.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, cy, cz), rad + 1);
+      var m = H.instance(g2, mat, sub), col = new THREE.Color();
+      if (sub[0].c) {
+        for (var ci = 0; ci < sub.length; ci++) { col.setRGB(sub[ci].c[0], sub[ci].c[1], sub[ci].c[2]); m.setColorAt(ci, col); }
+        m.instanceColor.needsUpdate = true;
+      }
+      m.castShadow = !!shadow;
+      m.userData.keepUV = true;
+      target.add(m);
+    }
+  }
+  // Box without its bottom face (10 tris): rooftop clutter never shows its underside.
+  function boxNoBottom(w, h, d) {
+    var g = new THREE.BoxGeometry(w, h, d), idx = g.index.array, keep = [];
+    for (var q = 0; q < idx.length; q++) { if (((q / 6) | 0) === 3) continue; keep.push(idx[q]); }
+    g.setIndex(keep);
+    return g;
+  }
+  var cityX = mats.city.userData;
+  var roofConcMat = cityX.roofMat || mats.city;
+  var clutterMat = cityX.clutterMat || mats.ivory;
+  cityInst(wallGeo, mats.city, wallNearT, true);
+  cityInst(wallGeo, mats.plaster, wallOldT, true);
+  cityInst(wallGeo, mats.city, wallFarT, false);
+  cityInst(roofCapGeo, roofConcMat, capNearT, true);
+  cityInst(roofCapGeo, roofConcMat, capFarT, false);
   for (var rv = 0; rv < roofVariantDefs.length; rv++) {
-    if (roofBuckets[rv].length) cityGroup.add(H.instance(roofVariantDefs[rv].geo, roofMats[rv], roofBuckets[rv]));
+    if (roofBuckets[rv].length) {
+      var rgeo = roofVariantDefs[rv].geo, rbefore = cityGroup.children.length;
+      cityInst(rgeo, roofMats[rv], roofBuckets[rv], true);
+      for (var rci = rbefore; rci < cityGroup.children.length; rci++) cityGroup.children[rci].userData.keepUV = false;
+    }
   }
-  cityGroup.add(H.instance(new THREE.BoxGeometry(1, 1, 1), mats.city, farT));
-  if (microT.length) cityGroup.add(H.instance(new THREE.BoxGeometry(1, 1, 1), mats.city, microT));
+  var tankGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.1, 6);
+  tankGeo.setIndex(Array.prototype.slice.call(tankGeo.index.array, 0, (6 * 2 + 6) * 3)); // torso + top cap only
+  cityInst(tankGeo, clutterMat, tankT, false);
+  cityInst(boxNoBottom(1, 1, 1), clutterMat, hutT, false);
+  cityInst(boxNoBottom(1, 1, 1), clutterMat, solarT, false);
+  cityInst(boxNoBottom(0.07, 3.2, 0.07), clutterMat, poleT, false);
   if (parkT.length) cityGroup.add(H.instance(parkGeo, mats.grass, parkT));
-  if (streetT.length) {
-    // Light cream/off-white paving (cloned from ivory) reads as a clear passage against the
-    // white plaster house walls and terracotta roofs -- higher contrast than the grey rock tint.
-    var streetMat = mats.ivory.clone();
-    streetMat.color.setRGB(0.88, 0.84, 0.74);
-    cityGroup.add(H.instance(streetGeo, streetMat, streetT));
+  // Grey asphalt floor under the whole city (fades out past the outermost blocks): covers the
+  // tan ground texture so the lanes between blocks read as street, not sand.
+  if (cityX.asphaltMat) {
+    var asphaltMat = cityX.asphaltMat;
+    var asphaltGeo = new THREE.PlaneGeometry(3000, 3000); asphaltGeo.rotateX(-PI / 2);
+    asphaltMat.polygonOffset = true; asphaltMat.polygonOffsetFactor = -2; asphaltMat.polygonOffsetUnits = -2;
+    var asphaltMesh = new THREE.Mesh(asphaltGeo, asphaltMat);
+    asphaltMesh.position.set(-45, -80.15, 0); asphaltMesh.receiveShadow = true; asphaltMesh.userData.keepUV = true; asphaltMesh.renderOrder = -1;
+    cityGroup.add(asphaltMesh);
   }
-  if (cityTreeTrunkT.length) cityGroup.add(H.instance(treeTrunkGeo, mats.trunk, cityTreeTrunkT));
-  if (forestTrunkT.length) cityGroup.add(H.instance(forestTrunkGeo, mats.trunk, forestTrunkT));
-  if (forestOliveT.length) cityGroup.add(H.instance(forestCanopyGeo, mats.foliageOlive, forestOliveT));
-  if (forestCypressT.length) cityGroup.add(H.instance(forestCanopyGeo, mats.foliageCypress, forestCypressT));
-  if (cityTreeCanopyT.length) cityGroup.add(H.instance(treeCanopyGeo, mats.foliageCypress, cityTreeCanopyT));
+  cityInst(treeTrunkGeo, mats.trunk, cityTreeTrunkT, false);
+  cityInst(forestCanopyGeo, mats.foliageOlive, forestOliveT, true);
+  cityInst(forestCanopyGeo, mats.foliageCypress, forestCypressT, true);
+  cityInst(forestCanopyFarGeo, mats.foliageOlive, forestOliveFarT, false);
+  cityInst(forestCanopyFarGeo, mats.foliageCypress, forestCypressFarT, false);
+  cityInst(treeCanopyGeo, mats.foliageCypress, cityTreeCanopyT, true);
+  cityInst(treeCanopyGeo, mats.foliageCypress, cityTreeCanopyFarT, false);
   group.add(cityGroup);
 
   // Cheap plain-shaft columns for distant background landmarks (no fluting/entasis: they read
@@ -910,7 +1024,7 @@ window.buildTerrain = function (THREE, mats, H) {
     var n = 15, len = 56, colsA = [];
     for (var i2 = 0; i2 < n; i2++) colsA.push([-len / 2 + i2 * (len / (n - 1)), 0]);
     sGroup.add(cheapColonnade(colsA, 5.2, 0.24, mats.marble, mats.marble));
-    var back = new THREE.Mesh(new THREE.BoxGeometry(len + 2, 6.2, 1.2), mats.city);
+    var back = new THREE.Mesh(new THREE.BoxGeometry(len + 2, 6.2, 1.2), mats.rock);
     back.position.set(0, 3.1, -5.5);
     back.castShadow = true; back.receiveShadow = true;
     sGroup.add(back);
