@@ -48,6 +48,44 @@ window.startAcropolis = function () {
         'gl_FragColor = vec4( vec3( mix( pow( 1.0 - occlusion, 3.0 ), 1.0, smoothstep( 250.0, 450.0, -viewZ ) ) ), 1.0 );');
       ssao.ssaoMaterial.needsUpdate = true;
       if (location.search.indexOf('aoonly') >= 0) ssao.output = THREE.SSAOPass.OUTPUT.SSAO;
+      // The normal pass (which also supplies SSAO's depth) skips objects more than ~450 m away:
+      // AO has faded out there anyway, so drawing them a second time is wasted work
+      var aoSphere = new THREE.Sphere(), aoBox = new THREE.Box3(), aoV = new THREE.Vector3(), aoM = new THREE.Matrix4();
+      function worldSphere(o) {
+        if (!o.userData._aoSphere) {
+          if (o.isInstancedMesh) {
+            aoBox.makeEmpty();
+            if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+            var gr = o.geometry.boundingSphere.radius, maxS = 0;
+            for (var k = 0; k < o.count; k++) {
+              o.getMatrixAt(k, aoM);
+              aoBox.expandByPoint(aoV.setFromMatrixPosition(aoM));
+              maxS = Math.max(maxS, aoM.getMaxScaleOnAxis());
+            }
+            aoBox.getBoundingSphere(aoSphere);
+            aoSphere.radius += gr * maxS;
+          } else {
+            if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+            aoSphere.copy(o.geometry.boundingSphere);
+          }
+          o.userData._aoSphere = aoSphere.clone();
+        }
+        return aoSphere.copy(o.userData._aoSphere).applyMatrix4(o.matrixWorld);
+      }
+      var baseOverride = ssao.renderOverride.bind(ssao), hidden = [];
+      ssao.renderOverride = function (r, mat, rt, cc, ca) {
+        if (mat === ssao.normalMaterial) {
+          scene.traverseVisible(function (o) {
+            if (!o.isMesh || !o.geometry) return;
+            var sp = worldSphere(o);
+            if (sp.center.distanceTo(camera.position) - sp.radius > 450) hidden.push(o);
+          });
+          for (var h = 0; h < hidden.length; h++) hidden[h].visible = false;
+        }
+        baseOverride(r, mat, rt, cc, ca);
+        for (var j = 0; j < hidden.length; j++) hidden[j].visible = true;
+        hidden.length = 0;
+      };
       composer.addPass(ssao);
       composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(W, Hh), 0.18, 0.5, 0.92));
       composer.addPass(new THREE.ShaderPass(THREE.GammaCorrectionShader));
@@ -125,6 +163,7 @@ window.startAcropolis = function () {
     var dt = Math.min(0.05, clock.getDelta());
     ctrl.update(dt);
     env.update(dt);
+    if (env.fitShadows) env.fitShadows(ctrl.target, camera.position.distanceTo(ctrl.target), performance.now());
     renderer.info.reset();
     if (composer) composer.render(dt); else renderer.render(scene, camera);
     frames++;

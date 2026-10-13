@@ -118,6 +118,8 @@ window.loadAssets = function (THREE, scene, mats, renderer, H) {
     mesh.receiveShadow = true;
     scene.add(mesh);
     proc.visible = false;
+    // Shadows are rendered on demand (10-env.js); the new statue must appear in them
+    if (window.markShadowsDirty) window.markShadowsDirty();
     return mesh;
   }
 

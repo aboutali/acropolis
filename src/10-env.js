@@ -360,5 +360,36 @@ window.buildEnv = function (THREE, scene, renderer) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-  return { sun: sun, update: function (dt) {} };
+  // The sun and scene never move, so the shadow map renders only when needed: once at start,
+  // when late assets arrive (markShadowsDirty) and when the view moves enough to refit it.
+  // Refitting centres the shadow frustum on the orbit target and sizes it to the view
+  // distance, so close-ups get several times sharper shadows than one map over the hill.
+  renderer.shadowMap.autoUpdate = location.search.indexOf('shadowauto') >= 0;
+  renderer.shadowMap.needsUpdate = true;
+  var fitC = new THREE.Vector3(cx, 0, cz), fitHalf = camR, lastFit = -1e9;
+  var NOFIT = typeof location !== 'undefined' && location.search.indexOf('nofit') >= 0;
+  function applyFit(c, half) {
+    fitC.copy(c); fitHalf = half;
+    sun.target.position.set(c.x, c.y, c.z);
+    sun.position.set(c.x + sunDirX * sunDist, c.y + sunDirY * sunDist, c.z + sunDirZ * sunDist);
+    var sc = sun.shadow.camera;
+    sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half;
+    sc.updateProjectionMatrix();
+    // normalBias is in world units: scale it with the texel size
+    sun.shadow.normalBias = Math.max(0.1, 0.55 * half / camR);
+    sun.target.updateMatrixWorld();
+    renderer.shadowMap.needsUpdate = true;
+  }
+  function fitShadows(target, dist, now) {
+    var half = Math.max(40, Math.min(camR, dist * 0.85));
+    // Far views keep the original hill-wide frustum centred on the plateau
+    var c = half >= camR ? new THREE.Vector3(cx, 0, cz) : target;
+    var moved = c.distanceTo(fitC) > 0.15 * fitHalf;
+    var resized = Math.abs(half - fitHalf) > 0.2 * fitHalf;
+    if (NOFIT) return;
+    if ((moved || resized) && now - lastFit > 250) { lastFit = now; applyFit(c, half); }
+  }
+  window.markShadowsDirty = function () { renderer.shadowMap.needsUpdate = true; };
+
+  return { sun: sun, update: function (dt) {}, fitShadows: fitShadows };
 };
